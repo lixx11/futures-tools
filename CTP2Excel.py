@@ -17,7 +17,7 @@ import sys
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
-COLUMNS = ('账户', '日期', '期初结存', '出入金合计', '平仓盈亏', '盯市盈亏', '手续费', '期末结存') # 结算总表
+COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', '手续费', '期末结存') # 结算总表
 EPSILON = 0.01  # 匹配误差容忍度
 
 def extract_data(filepath):
@@ -151,11 +151,52 @@ if __name__ == "__main__":
             row_dict['盯市盈亏'] = stats['mtm_pl']
             row_dict['手续费'] = stats['commission']
             row_dict['期末结存'] = stats['balance_cf']
+            # 处理银期出入金
+            dw_bf = 0.
+            if 'dw_array' in stats:
+                dw_bf += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
+                dw_bf -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
+            row_dict['银期出入金'] = dw_bf
+            # 处理手续费返还
+            dw_return_fee = 0.
+            if 'dw_array' in stats:
+                dw_return_fee += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '手续费返还'])
+            row_dict['手续费返还'] = dw_return_fee
+            # 处理利息返还
+            dw_return_interest = 0.
+            if 'dw_array' in stats:
+                dw_return_interest += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '利息返还'])
+            row_dict['利息返还'] = dw_return_interest
+            # 处理中金所申报费
+            dw_cffex_fee = 0. 
+            if 'dw_array' in stats:
+                dw_cffex_fee -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '中金所申报费'])
+            row_dict['中金所申报费'] = dw_cffex_fee
             client_data.append(row_dict)
         # 总表
         client_df = pd.DataFrame(client_data, columns=COLUMNS)
         client_df['date'] = pd.to_datetime(client_df['日期'])
         client_df.sort_values(by='date', ascending=True, inplace=True)
+        # 检查出入金
+        bug_rows = ((
+            client_df['银期出入金'] + client_df['手续费返还'] + client_df['利息返还'] + client_df['中金所申报费'] - client_df['出入金合计']
+            ).abs() > EPSILON
+        )
+        if bug_rows.sum() > 0:
+            print('WARNING! 出入金不匹配，请检查下列日期出入金数据：\n %s' % str(client_df[bug_rows]))
+        # 检查期初结存 + 当期总流水 与 期末结存
+        bug_rows = ((
+            client_df['期初结存'] + client_df['出入金合计'] + client_df['平仓盈亏'] + client_df['盯市盈亏'] + client_df['手续费'] - client_df['期末结存']
+            ).abs() > EPSILON
+        )
+        if bug_rows.sum() > 0:
+            print('WARNING! 期初结存+当期流水与期末结存不匹配，请检查下列日期数据：\n %s' % str(client_df[~bug_rows]))
+        # 检查期末结存与下期初结存
+        bug_rows = np.where(np.abs(client_df['期末结存'].values[:-1] - client_df['期初结存'].values[1:]) > EPSILON)[0].tolist()
+        if len(bug_rows) > 0:
+            bug_rows.append(max(bug_rows) + 1)
+            print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
+        # 写入结算主表
         writer = pd.ExcelWriter(os.path.join(output_dir, '%s.xlsx' % client))
         client_df.to_excel(
             writer, '结算汇总', index=False, columns=COLUMNS
@@ -168,7 +209,15 @@ if __name__ == "__main__":
             bf_array += [dw_item for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账']
         bf_df = pd.DataFrame(bf_array)
         bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
+        # 检查每日银期出入金
+        for date in client_df['日期']:
+            bf_rows = bf_df['日期'] == date
+            bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
+            if bug_rows.sum() > 0:
+                print('WARNING! 银期出入金数据不匹配：%s' % date)
         bf_df.to_excel(
             writer, '银期转账', index=False, columns=('日期', '入金', '出金')
         )
         writer.save()
+        print('-' * 80)
+        print('结算单检查完毕，数据写入目录%s' % output_dir)
