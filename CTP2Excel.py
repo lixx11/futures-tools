@@ -12,6 +12,7 @@ Options:
 from docopt import docopt
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 import os
 import sys
 
@@ -50,10 +51,14 @@ def process_head(content):
     """
     处理结算单表头信息，获取用户id、用户姓名以及日期
     """
-
-    client_id = content[4].split('：')[1].strip().split()[0]
-    client_name = content[4].split('：')[2].strip()
-    date = content[5].split('：')[-1].strip()
+    for i in range(len(content)):
+        if '客户号' in content[i]:
+            client_row = i
+        if '日期' in content[i]:
+            date_row = i
+    client_id = content[client_row].split('：')[1].strip().split()[0]
+    client_name = content[client_row].split('：')[2].strip()
+    date = content[date_row].split('：')[-1].strip()
     stats = {
         'client_id': client_id,
         'client_name': client_name,
@@ -66,13 +71,25 @@ def process_summary(content):
     """
     处理资金状况，获取期初结存、出入金、平仓盈亏、盯市盈亏、手续费和期末结存等数据。
     """
-
-    balance_bf = float(content[2].split('：')[1].strip().split()[0])  # 期初结存
-    total_deposit_withdrawal = float(content[3].split('：')[1].strip().split()[0])  # 总出入金
-    realized_pl = float(content[4].split('：')[1].strip().split()[0])  # 平仓盈亏
-    mtm_pl = float(content[5].split('：')[1].strip().split()[0])  # 盯市盈亏
-    commission = -float(content[7].split('：')[1].strip().split()[0])  # 手续费
-    balance_cf = float(content[3].split('：')[-1].strip())  # 期末结存
+    for i in range(len(content)):
+        if '期初结存' in content[i]:
+            balance_bf_row = i
+        if '出 入 金' in content[i]:
+            total_deposit_withdrawal_row = i
+        if '平仓盈亏' in content[i]:
+            realized_pl_row = i
+        if '盯市盈亏' in content[i]:
+            mtm_pl_row = i
+        if '手 续 费' in content[i]:
+            commission_row = i
+        if '期末结存' in content[i]:
+            balance_cf_row = i
+    balance_bf = float(content[balance_bf_row].split('：')[1].strip().split()[0])  # 期初结存
+    total_deposit_withdrawal = float(content[total_deposit_withdrawal_row].split('：')[1].strip().split()[0])  # 总出入金
+    realized_pl = float(content[realized_pl_row].split('：')[1].strip().split()[0])  # 平仓盈亏
+    mtm_pl = float(content[mtm_pl_row].split('：')[1].strip().split()[0])  # 盯市盈亏
+    commission = -float(content[commission_row].split('：')[1].strip().split()[0])  # 手续费
+    balance_cf = float(content[balance_cf_row].split('：')[-1].strip())  # 期末结存
     total_delta = total_deposit_withdrawal + realized_pl + mtm_pl + commission  # 当期总流水
     if abs(balance_bf + total_delta - balance_cf) > EPSILON:  # 检查期初结存+总流水与期末结存是否匹配
         print('WARNING! 期初结存(%.2f) + 当期总流水(%.2f) = %.2f != 期末结存(%.2f)'
@@ -93,21 +110,27 @@ def process_deposit_withdrawal(content):
     处理出入金，获取各笔出入金类型与金额。
     """
     dw_array = []
-    for i in range(5, len(content)):
-        if len(content[i].strip('-\n')) == 0:
-            last_row = i
-            break
-    for i in range(5, last_row):
+    dash_rows = [i for i in range(len(content)) if (len(content[i].strip()) != 0 and len(content[i].strip('-\n')) == 0)]
+    for i in range(dash_rows[1] + 1, dash_rows[2]):
+        if len(content[i].strip()) == 0:  # skip empty row
+            continue
         date, dw_type, deposit, withdrawal, comment  = content[i][1:-2].split('|')
         if '中金所申报费' in comment:
             dw_type = '中金所申报费'
+        if '手续费减收' in comment:
+            dw_type = '手续费返还'
+        if '利息返还' in comment:
+            dw_type = '利息返还'
         dw_array.append({
             'date': date.strip(),
             'dw_type': dw_type.strip(),
             'deposit': float(deposit),
             'withdrawal': float(withdrawal),
         })
-    _, _, total_deposit, total_withdrawal, _ = content[last_row + 1][1:-2].split('|')
+    for i in range(dash_rows[2], dash_rows[3]):
+        if '|' in content[i]:
+            total_row = i
+    _, _, total_deposit, total_withdrawal, _ = content[total_row][1:-2].split('|')
     total_deposit = float(total_deposit)
     total_withdrawal = float(total_withdrawal)
     if abs(sum([dw_array[i]['deposit'] for i in range(len(dw_array))]) - total_deposit) > EPSILON:
@@ -125,10 +148,10 @@ def process_deposit_withdrawal(content):
 if __name__ == "__main__":
     argv = docopt(__doc__)
     CTP_files = argv['<CTP-file>']
-    print('Generate summary from %s' % CTP_files)
+    print('Generating summary from %d files: %s' % (len(CTP_files), CTP_files))
     all_stats = []
-    for CTP_file in CTP_files:
-        print('Processing %s' % CTP_file)
+    print('Processing CTP files...')
+    for CTP_file in tqdm(CTP_files):
         stats = extract_data(CTP_file)
         all_stats.append(stats)
     client_ids = np.unique([stats['client_id'] for stats in all_stats])
@@ -197,7 +220,8 @@ if __name__ == "__main__":
             bug_rows.append(max(bug_rows) + 1)
             print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
         # 写入结算主表
-        writer = pd.ExcelWriter(os.path.join(output_dir, '%s.xlsx' % client))
+        output_path = os.path.join(output_dir, '%s.xlsx' % client)
+        writer = pd.ExcelWriter(output_path)
         client_df.to_excel(
             writer, '结算汇总', index=False, columns=COLUMNS
         )
@@ -207,17 +231,18 @@ if __name__ == "__main__":
             if 'dw_array' not in stats:
                 continue
             bf_array += [dw_item for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账']
-        bf_df = pd.DataFrame(bf_array)
-        bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
-        # 检查每日银期出入金
-        for date in client_df['日期']:
-            bf_rows = bf_df['日期'] == date
-            bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
-            if bug_rows.sum() > 0:
-                print('WARNING! 银期出入金数据不匹配：%s' % date)
-        bf_df.to_excel(
-            writer, '银期转账', index=False, columns=('日期', '入金', '出金')
-        )
+        if len(bf_array) > 0:
+            bf_df = pd.DataFrame(bf_array)
+            bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
+            # 检查每日银期出入金
+            for date in client_df['日期']:
+                bf_rows = bf_df['日期'] == date
+                bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
+                if bug_rows.sum() > 0:
+                    print('WARNING! 银期出入金数据不匹配：%s' % date)
+            bf_df.to_excel(
+                writer, '银期转账', index=False, columns=('日期', '入金', '出金')
+            )
         writer.save()
         print('-' * 80)
-        print('结算单检查完毕，数据写入目录%s' % output_dir)
+        print('%s --> %s' % (client, output_path))
