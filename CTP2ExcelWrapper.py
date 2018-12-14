@@ -32,13 +32,12 @@ if __name__ == "__main__":
     for company in companies:
         raw_files = glob('%s/%s/*/*.txt' % (raw_dir, company))
         company_dir = os.path.join(output_dir, company)
-        res = subprocess.run([
+        res = subprocess.call([
             'python', '%s/CTP2Excel.py' % BASE_PATH,
             '-o', company_dir
             ] + raw_files,
-            capture_output=True
         )
-        print(res.stdout.decode('utf-8'), res.stderr.decode('utf-8'))
+        # print(res.stdout.decode('utf-8'), res.stderr.decode('utf-8'))
     
     # 生成汇总报表
     client_files = glob('%s/*/*.xlsx' % output_dir)
