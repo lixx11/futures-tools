@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 """Generate Excel summary from multiple CTP files.
 
@@ -22,13 +21,6 @@ TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '�
 COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', '手续费', '期末结存') # 结算总表
 EPSILON = 0.01  # 匹配误差容忍度
 
-
-def merge_two_dicts(dict1, dict2):
-    merged_dict = dict1.copy()   # start with x's keys and values
-    merged_dict.update(dict2)    # modifies z with y's keys and values & returns None
-    return merged_dict
-
-
 def extract_data(filepath):
     with open(filepath) as f:
         contents = f.readlines()
@@ -41,18 +33,15 @@ def extract_data(filepath):
             if TABLE in contents[i]:
                 block_content = contents[row_id:i]
                 if row_id == 0:
-                    # stats = {**stats, **process_head(block_content)}
-                    stats = merge_two_dicts(stats, process_head(block_content))
+                    stats = {**stats, **process_head(block_content)}
                 elif block_prev == '资金状况':
-                    # stats = {**stats, **process_summary(block_content)}
-                    stats = merge_two_dicts(stats, process_summary(block_content))
+                    stats = {**stats, **process_summary(block_content)}
                 elif block_prev == '出入金明细':
                     _stats = process_deposit_withdrawal(block_content)
                     if abs(stats['total_deposit_withdrawal'] - _stats['total_deposit_withdrawal']) > EPSILON:
                         print('WARNING! 资金状况出入金(%.2f)与出入金明细不匹配(%.2f)！' 
                               % (stats['total_deposit_withdrawal'], _stats['total_deposit_withdrawal']))
-                    # stats = {**stats, **_stats}
-                    stats = merge_two_dicts(stats, _stats)
+                    stats = {**stats, **_stats}
                 row_id = i
                 block_prev = TABLE
     return stats
