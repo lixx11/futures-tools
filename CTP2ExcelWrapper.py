@@ -7,6 +7,7 @@ Usage:
 
 Options:
     -h --help               Show this screen.
+    -e --ext=<extension>    Specify extension of CTP files [default: txt].
     -o --output=<folder>    Specify output directory [default: output].
 """
 
@@ -24,12 +25,16 @@ BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
     argv = docopt(__doc__)
     raw_dir = argv['<RAW-DIR>']
+    ext = argv['--ext']
     output_dir = argv['--output']
     print('Read raw data from %s, and write summary to %s' % (raw_dir, output_dir))
 
     companies = next(os.walk(raw_dir))[1]
     for company in companies:
-        raw_files = glob('%s/%s/*/*.txt' % (raw_dir, company))
+        raw_files = glob('%s/%s/*/*.%s' % (raw_dir, company, ext))
+        if len(raw_files) == 0:
+            print('WARNING! 未找到%s结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
+            continue
         company_dir = os.path.join(output_dir, company)
         res = subprocess.run([
             'python', '%s/CTP2Excel.py' % BASE_PATH,
