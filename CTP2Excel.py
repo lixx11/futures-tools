@@ -151,8 +151,14 @@ if __name__ == "__main__":
     print('Generating summary from %d files: %s' % (len(CTP_files), CTP_files))
     all_stats = []
     print('Processing CTP files...')
+    records = []
     for CTP_file in tqdm(CTP_files):
         stats = extract_data(CTP_file)
+        record = (stats['client_id'], stats['date'])
+        if record in records:
+            print('Skipping duplicated CTP file %s' % CTP_file)
+            continue
+        records.append(record)
         all_stats.append(stats)
     client_ids = np.unique([stats['client_id'] for stats in all_stats])
     
