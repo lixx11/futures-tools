@@ -8,13 +8,15 @@ Usage:
 Options:
     -h --help               Show this screen.
     -o --output=<folder>    Specify output directory [default: output].
+    --start-date=<DATE>     Specify start date [default: 19900101].
+    --end-date=<DATE>       Specify end date [default: NOW].
 """
 from docopt import docopt
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 import os
 import sys
+from datetime import datetime
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
@@ -148,15 +150,25 @@ def process_deposit_withdrawal(content):
 if __name__ == "__main__":
     argv = docopt(__doc__)
     CTP_files = argv['<CTP-file>']
-    print('Generating summary from %d files: %s' % (len(CTP_files), CTP_files))
-    all_stats = []
-    print('Processing CTP files...')
+    start_date = datetime.strptime(argv['--start-date'], '%Y%m%d')
+    if argv['--end-date'] == 'NOW':
+        end_date = datetime.now()
+    else:
+        end_date = datetime.strptime(argv['--end-date'], '%Y%m%d')
+    print('设定起始日期为%s，结束日期为%s' % (start_date, end_date))
+    print('生成总结算单（共%d个文件）' % len(CTP_files))
+    print('正在处理CTP文件...')
     records = []
-    for CTP_file in tqdm(CTP_files):
+    all_stats = []
+    for CTP_file in CTP_files:
         stats = extract_data(CTP_file)
         record = (stats['client_id'], stats['date'])
         if record in records:
-            print('Skipping duplicated CTP file %s' % CTP_file)
+            print('跳过重复的CTP文件：%s' % CTP_file)
+            continue
+        this_date = datetime.strptime(stats['date'], '%Y%m%d')
+        if this_date < start_date or this_date > end_date:
+            print('跳过不在日期范围内的CTP文件：%s' % CTP_file)
             continue
         records.append(record)
         all_stats.append(stats)
@@ -250,5 +262,4 @@ if __name__ == "__main__":
                 writer, '银期转账', index=False, columns=('日期', '入金', '出金')
             )
         writer.save()
-        print('-' * 80)
         print('%s --> %s' % (client, output_path))

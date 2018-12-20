@@ -9,6 +9,8 @@ Options:
     -h --help               Show this screen.
     -e --ext=<extension>    Specify extension of CTP files [default: txt].
     -o --output=<folder>    Specify output directory [default: output].
+    --start-date=<DATE>     Specify start date [default: 19900101].
+    --end-date=<DATE>       Specify end date [default: NOW].
 """
 
 
@@ -27,8 +29,10 @@ if __name__ == "__main__":
     raw_dir = argv['<RAW-DIR>']
     ext = argv['--ext']
     output_dir = argv['--output']
-    print('Read raw data from %s, and write summary to %s' % (raw_dir, output_dir))
-
+    start_date = argv['--start-date']
+    end_date = argv['--end-date']
+    print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
+    print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
     for company in companies:
         raw_files = glob('%s/%s/*/*.%s' % (raw_dir, company, ext))
@@ -38,11 +42,14 @@ if __name__ == "__main__":
         company_dir = os.path.join(output_dir, company)
         res = subprocess.run([
             'python', '%s/CTP2Excel.py' % BASE_PATH,
-            '-o', company_dir
+            '-o', company_dir,
+            '--start-date', start_date,
+            '--end-date', end_date,
             ] + raw_files,
             capture_output=True
         )
         print(res.stdout.decode('utf-8'), res.stderr.decode('utf-8'))
+        print('-' * 80)
     
     # 生成汇总报表
     client_files = glob('%s/*/*.xlsx' % output_dir)
@@ -63,4 +70,4 @@ if __name__ == "__main__":
     bf_df.to_excel(writer, '银期转账', index=False)
     writer.save()
     print('=' * 80)
-    print('Summary saved to %s' % final_summary)
+    print('总结算单已写入%s' % final_summary)
