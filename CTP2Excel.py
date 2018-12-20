@@ -20,13 +20,17 @@ from datetime import datetime
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
-COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', '手续费', '期末结存') # 结算总表
+COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计',
+           '平仓盈亏', '盯市盈亏', '手续费', '中金所手续费', '上期原油手续费', '期末结存') # 结算总表
+COMMISSION = (
+    ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),
+    ('INE_COMM', ('SC',))
+)
 EPSILON = 0.01  # 匹配误差容忍度
 
 def extract_data(filepath):
     with open(filepath) as f:
         contents = f.readlines()
-    # split contents into blocks
     row_id = 0
     block_prev = ''
     stats = {}
@@ -44,6 +48,8 @@ def extract_data(filepath):
                         print('WARNING! 资金状况出入金(%.2f)与出入金明细不匹配(%.2f)！' 
                               % (stats['total_deposit_withdrawal'], _stats['total_deposit_withdrawal']))
                     stats = {**stats, **_stats}
+                elif block_prev == '成交记录':
+                    stats = {**stats, **process_transaction(block_content)}
                 row_id = i
                 block_prev = TABLE
     return stats
@@ -147,6 +153,27 @@ def process_deposit_withdrawal(content):
     return stats
 
 
+def process_transaction(content):
+    """
+    处理成交记录，获取手续费金额，包括中金所（IF，IC，IH，TS， TF， T）和上期原油（SC）。
+    """
+    dash_rows = [i for i in range(len(content)) if (len(content[i].strip()) != 0 and len(content[i].strip('-\n')) == 0)]
+    stats = {}
+    for commission in COMMISSION:
+        stats[commission[0]] = 0.
+    for i in range(dash_rows[1] + 1, dash_rows[2]):
+        if len(content[i].strip()) == 0:  # skip empty row
+            continue
+        _, _, _, instrument, _, _, _, _, _, _, fee, _, _, _ = content[i][1:-2].split('|')
+        instrument = instrument.strip().upper()
+        fee = float(fee.strip())
+        for commission in COMMISSION:
+            for symbol in commission[1]:
+                if instrument[:-4] == symbol:
+                    stats[commission[0]] += fee
+    return stats
+
+
 if __name__ == "__main__":
     argv = docopt(__doc__)
     CTP_files = argv['<CTP-file>']
@@ -213,6 +240,8 @@ if __name__ == "__main__":
             if 'dw_array' in stats:
                 dw_cffex_fee -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '中金所申报费'])
             row_dict['中金所申报费'] = dw_cffex_fee
+            row_dict['中金所手续费'] = stats['CFFEX_COMM'] if 'CFFEX_COMM' in stats else 0.
+            row_dict['上期原油手续费'] = stats['INE_COMM'] if 'INE_COMM' in stats else 0.
             client_data.append(row_dict)
         # 总表
         client_df = pd.DataFrame(client_data, columns=COLUMNS)
