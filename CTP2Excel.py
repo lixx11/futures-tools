@@ -20,11 +20,15 @@ from datetime import datetime
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
-COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计',
-           '平仓盈亏', '盯市盈亏', '手续费', '中金所手续费', '上期原油手续费', '期末结存') # 结算总表
+COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', 
+           '手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存') # 结算总表
 COMMISSION = (
-    ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),
-    ('INE_COMM', ('SC',))
+    ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),  # 中金所
+    ('INE_COMM', ('SC',)),  # 上期原油
+    ('SHFE_COMM', ('AG', 'AL', 'AU', 'BU', 'CU', 'FU', 'HC', 'NI', 'PB', 'RB', 'RU', 'SN', 'SP', 'WR', 'ZN')),  # 上期所15个品种
+    ('CZCE_COMM', ('AP', 'CF', 'CY', 'FG', 'JR', 'LR', 'MA', 'OI', 'PM', 'RI', 'RM', 'RS', 'SF', 'SM', 'SR', 'TA', 'WH', 'ZC')), # 郑商所18个品种
+    ('DCE_IND_COMM', ('BB', 'FB', 'I', 'J', 'JM', 'L', 'PP', 'V', 'EG')), # 大商所9个工业品品种
+    ('DCE_ARG_COMM', ('A', 'B', 'C', 'CS', 'JD', 'M', 'P', 'Y')) # 大商所8个农产品品种
 )
 EPSILON = 0.01  # 匹配误差容忍度
 
@@ -155,7 +159,7 @@ def process_deposit_withdrawal(content):
 
 def process_transaction(content):
     """
-    处理成交记录，获取手续费金额，包括中金所（IF，IC，IH，TS， TF， T）和上期原油（SC）。
+    处理成交记录，获取手续费金额，包括中金所、上期所、上期原油、郑商所、大商所工业品和大商所农产品共6类。
     """
     dash_rows = [i for i in range(len(content)) if (len(content[i].strip()) != 0 and len(content[i].strip('-\n')) == 0)]
     stats = {}
@@ -169,8 +173,8 @@ def process_transaction(content):
         fee = float(fee.strip())
         for commission in COMMISSION:
             for symbol in commission[1]:
-                if instrument[:-4] == symbol:
-                    stats[commission[0]] += fee
+                if ''.join([c for c in instrument if not c.isdigit()]) == symbol:
+                    stats[commission[0]] -= fee
     return stats
 
 
@@ -242,6 +246,10 @@ if __name__ == "__main__":
             row_dict['中金所申报费'] = dw_cffex_fee
             row_dict['中金所手续费'] = stats['CFFEX_COMM'] if 'CFFEX_COMM' in stats else 0.
             row_dict['上期原油手续费'] = stats['INE_COMM'] if 'INE_COMM' in stats else 0.
+            row_dict['上期所手续费'] = stats['SHFE_COMM'] if 'SHFE_COMM' in stats else 0. 
+            row_dict['郑商所手续费'] = stats['CZCE_COMM'] if 'CZCE_COMM' in stats else 0. 
+            row_dict['大商所工业品手续费'] = stats['DCE_IND_COMM'] if 'DCE_IND_COMM' in stats else 0. 
+            row_dict['大商所农产品手续费'] = stats['DCE_ARG_COMM'] if 'DCE_ARG_COMM' in stats else 0.
             client_data.append(row_dict)
         # 总表
         client_df = pd.DataFrame(client_data, columns=COLUMNS)
