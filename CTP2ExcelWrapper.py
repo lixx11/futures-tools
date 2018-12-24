@@ -9,16 +9,20 @@ Options:
     -h --help               Show this screen.
     -e --ext=<extension>    Specify extension of CTP files [default: txt].
     -o --output=<folder>    Specify output directory [default: output].
-    --start-date=<DATE>     Specify start date [default: 19900101].
+    --start-date=<DATE>     Specify start date [default: 19990101].
     --end-date=<DATE>       Specify end date [default: NOW].
+    --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
 """
 
 
 from docopt import docopt
 import os
+import sys
 from glob import glob
 import subprocess
 import pandas as pd
+import tushare as ts
+from datetime import datetime
 
 
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -31,13 +35,32 @@ if __name__ == "__main__":
     output_dir = argv['--output']
     start_date = argv['--start-date']
     end_date = argv['--end-date']
+    tk = argv['--TK']
+    if argv['--end-date'] == 'NOW':
+        end_date = datetime.now().strftime('%Y%m%d')
+    print('设定起始日期为%s，结束日期为%s' % (start_date, end_date))
+    # 获取交易日历
+    if tk == 'xxli':
+        if os.path.exists('./tk.csv'):
+            with open('./tk.csv', 'r') as f:
+                contents = f.readlines()
+            tk = contents[1].strip()
+        else:
+            print('无法找到默认的TOKEN文件！')
+            sys.exit()
+    ts.set_token(tk)
+    pro = ts.pro_api()
+    cal_df = pro.trade_cal(exchange='', start_date=start_date, end_date=end_date)
+    cal_df = cal_df[cal_df['is_open'] == 1]
+    cal_df.to_csv('td.csv', index='False')
     print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
     print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
     for company in companies:
+        print('处理%s期货公司数据' % company)
         raw_files = glob('%s/%s/*/*.%s' % (raw_dir, company, ext))
         if len(raw_files) == 0:
-            print('WARNING! 未找到%s结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
+            print('WARNING! 未找到%s内的结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
             continue
         company_dir = os.path.join(output_dir, company)
         res = subprocess.run([
@@ -64,7 +87,7 @@ if __name__ == "__main__":
     
     client_df = pd.concat(client_data)
     bf_df = pd.concat(bf_data)
-    final_summary = os.path.join(output_dir, 'summary.xlsx')
+    final_summary = os.path.join(output_dir, '结算总表_%s_%s.xlsx' % (start_date, end_date))
     writer = pd.ExcelWriter(final_summary)
     client_df.to_excel(writer, '结算汇总', index=False)
     bf_df.to_excel(writer, '银期转账', index=False)

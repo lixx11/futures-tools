@@ -10,6 +10,7 @@ Options:
     -o --output=<folder>    Specify output directory [default: output].
     --start-date=<DATE>     Specify start date [default: 19900101].
     --end-date=<DATE>       Specify end date [default: NOW].
+    --TD=<FILE>             Specify trading dates file [default: td.csv].
 """
 from docopt import docopt
 import numpy as np
@@ -56,6 +57,18 @@ def extract_data(filepath):
                     stats = {**stats, **process_transaction(block_content)}
                 row_id = i
                 block_prev = TABLE
+    # process last table
+    block_content = contents[row_id:]
+    if block_prev == '资金状况':
+        stats = {**stats, **process_summary(block_content)}
+    elif block_prev == '出入金明细':
+        _stats = process_deposit_withdrawal(block_content)
+        if abs(stats['total_deposit_withdrawal'] - _stats['total_deposit_withdrawal']) > EPSILON:
+            print('WARNING! 资金状况出入金(%.2f)与出入金明细不匹配(%.2f)！' 
+                % (stats['total_deposit_withdrawal'], _stats['total_deposit_withdrawal']))
+        stats = {**stats, **_stats}
+    elif block_prev == '成交记录':
+        stats = {**stats, **process_transaction(block_content)}
     return stats
 
 
@@ -186,7 +199,8 @@ if __name__ == "__main__":
         end_date = datetime.now()
     else:
         end_date = datetime.strptime(argv['--end-date'], '%Y%m%d')
-    print('设定起始日期为%s，结束日期为%s' % (start_date, end_date))
+    cal_df = pd.read_csv(argv['--TD'])
+    trading_dates = list(map(str, cal_df['cal_date'].values))
     print('生成总结算单（共%d个文件）' % len(CTP_files))
     print('正在处理CTP文件...')
     records = []
@@ -274,6 +288,14 @@ if __name__ == "__main__":
         if len(bug_rows) > 0:
             bug_rows.append(max(bug_rows) + 1)
             print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
+        # 加入空行表示未交易日
+        dummy_dates = list(set(trading_dates) - set(client_df['日期'].values.tolist()))
+        dummy_df = pd.DataFrame(
+            [{'日期': date, '账户': client_id} for date in dummy_dates]
+            )
+        client_df = pd.concat([client_df, dummy_df], ignore_index=True, sort=False)
+        client_df['date'] = pd.to_datetime(client_df['日期'])
+        client_df.sort_values(by='date', ascending=True, inplace=True)
         # 写入结算主表
         output_path = os.path.join(output_dir, '%s.xlsx' % client)
         writer = pd.ExcelWriter(output_path)
