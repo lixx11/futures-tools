@@ -359,7 +359,7 @@ if __name__ == "__main__":
         for i in range(1, len(client_df)):
             _dw_bf = client_df['银期出入金'][i]
             _balance_cf1 = client_df['期末结存'][i]
-            _balance_cf2 = _balance_cf1 - client_df['手续费'][i] \
+            _balance_cf2 = _balance_cf1 - client_df['手续费返还'][i] \
                 - client_df['中金所手续费'][i] * return_factors['CFFEX'] \
                 - client_df['上期原油手续费'][i] * return_factors['INE'] \
                 - client_df['上期所手续费'][i] * return_factors['SHFE'] \
