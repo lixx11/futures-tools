@@ -57,7 +57,7 @@ def extract_data(filepath):
                 elif block_prev == '资金状况':
                     stats = {**stats, **process_summary(block_content)}
                 elif block_prev == '出入金明细':
-                    _stats = process_deposit_withdrawal(block_content)
+                    _stats = process_deposit_withdrawal(block_content, stats['company'])
                     if abs(stats['total_deposit_withdrawal'] - _stats['total_deposit_withdrawal']) > EPSILON:
                         print('WARNING! 资金状况出入金(%.2f)与出入金明细不匹配(%.2f)！' 
                               % (stats['total_deposit_withdrawal'], _stats['total_deposit_withdrawal']))
@@ -71,7 +71,7 @@ def extract_data(filepath):
     if block_prev == '资金状况':
         stats = {**stats, **process_summary(block_content)}
     elif block_prev == '出入金明细':
-        _stats = process_deposit_withdrawal(block_content)
+        _stats = process_deposit_withdrawal(block_content, stats['company'])
         if abs(stats['total_deposit_withdrawal'] - _stats['total_deposit_withdrawal']) > EPSILON:
             print('WARNING! 资金状况出入金(%.2f)与出入金明细不匹配(%.2f)！' 
                 % (stats['total_deposit_withdrawal'], _stats['total_deposit_withdrawal']))
@@ -83,17 +83,20 @@ def extract_data(filepath):
 
 def process_head(content):
     """
-    处理结算单表头信息，获取用户id、用户姓名以及日期
+    处理结算单表头信息，获取期货公司、用户id、用户姓名以及日期
     """
     for i in range(len(content)):
         if '客户号' in content[i]:
             client_row = i
         if '日期' in content[i]:
             date_row = i
+    if '国投安信' in content[0]:
+        company = '国投安信'
     client_id = content[client_row].split('：')[1].strip().split()[0]
     client_name = content[client_row].split('：')[2].strip()
     date = content[date_row].split('：')[-1].strip()
     stats = {
+        'company': company,
         'client_id': client_id,
         'client_name': client_name,
         'date': date
@@ -139,7 +142,7 @@ def process_summary(content):
     return stats
 
 
-def process_deposit_withdrawal(content):
+def process_deposit_withdrawal(content, company):
     """
     处理出入金，获取各笔出入金类型与金额。
     """
@@ -149,12 +152,15 @@ def process_deposit_withdrawal(content):
         if len(content[i].strip()) == 0:  # skip empty row
             continue
         date, dw_type, deposit, withdrawal, comment  = content[i][1:-2].split('|')
+        comment = comment.strip()
         if '中金所申报费' in comment:
             dw_type = '中金所申报费'
         if '手续费减收' in comment:
             dw_type = '手续费返还'
         if '利息' in comment:
             dw_type = '利息返还'
+        if len(comment) == 0 and company == '国投安信':
+            dw_type = '银期转账'
         dw_array.append({
             'date': date.strip(),
             'dw_type': dw_type.strip(),
@@ -264,7 +270,6 @@ if __name__ == "__main__":
         records.append(record)
         all_stats.append(stats)
     client_ids = np.unique([stats['client_id'] for stats in all_stats])
-    
     # 数据汇总输出到Excel文件中
     output_dir = argv['--output']
     if not os.path.isdir(output_dir):
