@@ -7,17 +7,17 @@ Usage:
 
 Options:
     -h --help               Show this screen.
-    -e --ext=<extension>    Specify extension of CTP files [default: txt].
+    -e --ext=<extension>    Specify extension of CTP files [default: csv].
     -o --output=<folder>    Specify output directory [default: output].
     --start-date=<DATE>     Specify start date [default: 19990101].
     --end-date=<DATE>       Specify end date [default: NOW].
     --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
-    --CFFEX-return=<NUM>    Specify return factor of CFFEX commission [default: 0.3].
-    --INE-return=<NUM>      Specify return factor of INE commission [default: 0.3].
-    --SHFE-return=<NUM>     Specify return factor of SHFE commission [default: 0.3].
-    --CZCE-return=<NUM>     Specify return factor of CZCE commission [default: 0.3].
-    --DCE-IND-return=<NUM>  Specify return factor of DCE industrial products commission [default: 0.3].
-    --DCE-AGR-return=<NUM>  Specify return factor of DCE agricultural products [default: 0.3].
+    --CFFEX-return=<NUM>    Specify return factor of CFFEX commission [default: 0.].
+    --INE-return=<NUM>      Specify return factor of INE commission [default: 0.].
+    --SHFE-return=<NUM>     Specify return factor of SHFE commission [default: 0.32].
+    --CZCE-return=<NUM>     Specify return factor of CZCE commission [default: 0.44].
+    --DCE-IND-return=<NUM>  Specify return factor of DCE industrial products commission [default: 0.27].
+    --DCE-AGR-return=<NUM>  Specify return factor of DCE agricultural products [default: 0.36].
 """
 
 
