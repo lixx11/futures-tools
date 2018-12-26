@@ -12,6 +12,12 @@ Options:
     --start-date=<DATE>     Specify start date [default: 19990101].
     --end-date=<DATE>       Specify end date [default: NOW].
     --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
+    --CFFEX-return=<NUM>    Specify return factor of CFFEX commission [default: 0.3].
+    --INE-return=<NUM>      Specify return factor of INE commission [default: 0.3].
+    --SHFE-return=<NUM>     Specify return factor of SHFE commission [default: 0.3].
+    --CZCE-return=<NUM>     Specify return factor of CZCE commission [default: 0.3].
+    --DCE-IND-return=<NUM>  Specify return factor of DCE industrial products commission [default: 0.3].
+    --DCE-AGR-return=<NUM>  Specify return factor of DCE agricultural products [default: 0.3].
 """
 
 
@@ -26,6 +32,7 @@ from datetime import datetime
 
 
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+TD_FILE = 'td.csv'  # trading dates csv file
 
 
 if __name__ == "__main__":
@@ -52,7 +59,7 @@ if __name__ == "__main__":
     pro = ts.pro_api()
     cal_df = pro.trade_cal(exchange='', start_date=start_date, end_date=end_date)
     cal_df = cal_df[cal_df['is_open'] == 1]
-    cal_df.to_csv('td.csv', index='False')
+    cal_df.to_csv(TD_FILE, index='False')
     print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
     print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
@@ -68,6 +75,14 @@ if __name__ == "__main__":
             '-o', company_dir,
             '--start-date', start_date,
             '--end-date', end_date,
+            '--TD', TD_FILE,
+            '--TK', tk,
+            '--CFFEX-return', argv['--CFFEX-return'],
+            '--INE-return', argv['--INE-return'],
+            '--SHFE-return', argv['--SHFE-return'],
+            '--CZCE-return', argv['--CZCE-return'],
+            '--DCE-IND-return', argv['--DCE-IND-return'],
+            '--DCE-AGR-return', argv['--DCE-AGR-return'],
             ] + raw_files,
             capture_output=True
         )
@@ -85,7 +100,7 @@ if __name__ == "__main__":
         if '银期转账' in data:
             bf_data.append(data['银期转账'])
     
-    client_df = pd.concat(client_data)
+    client_df = pd.concat(client_data, sort=False)
     bf_df = pd.concat(bf_data)
     final_summary = os.path.join(output_dir, '结算总表_%s_%s.xlsx' % (start_date, end_date))
     writer = pd.ExcelWriter(final_summary)

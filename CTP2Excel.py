@@ -10,7 +10,8 @@ Options:
     -o --output=<folder>    Specify output directory [default: output].
     --start-date=<DATE>     Specify start date [default: 19900101].
     --end-date=<DATE>       Specify end date [default: NOW].
-    --TD=<FILE>             Specify trading dates file [default: td.csv].
+    --TD=<FILE>             Specify trading dates file.
+    --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
     --CFFEX-return=<NUM>    Specify return factor of CFFEX commission [default: 0.3].
     --INE-return=<NUM>      Specify return factor of INE commission [default: 0.3].
     --SHFE-return=<NUM>     Specify return factor of SHFE commission [default: 0.3].
@@ -24,6 +25,7 @@ import pandas as pd
 import os
 import sys
 from datetime import datetime, timedelta
+import tushare as ts
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
@@ -38,7 +40,7 @@ COMMISSION = (
     ('DCE_IND_COMM', ('BB', 'FB', 'I', 'J', 'JM', 'L', 'PP', 'V', 'EG')), # 大商所9个工业品品种
     ('DCE_AGR_COMM', ('A', 'B', 'C', 'CS', 'JD', 'M', 'P', 'Y')) # 大商所8个农产品品种
 )
-EPSILON = 0.01  # 匹配误差容忍度
+EPSILON = 0.001  # 匹配误差容忍度
 
 def extract_data(filepath):
     with open(filepath) as f:
@@ -214,7 +216,28 @@ if __name__ == "__main__":
         end_date = datetime.now()
     else:
         end_date = datetime.strptime(argv['--end-date'], '%Y%m%d')
-    cal_df = pd.read_csv(argv['--TD'])
+    # 获取交易日历：若指定TD文件，直接读取；否则从tushare调取数据
+    td = argv['--TD']
+    tk = argv['--TK']
+    if td is None:
+        if tk == 'xxli':
+            if os.path.exists('./tk.csv'):
+                with open('./tk.csv', 'r') as f:
+                    contents = f.readlines()
+                tk = contents[1].strip()
+            else:
+                print('无法找到默认的TOKEN文件！')
+                sys.exit()
+        ts.set_token(tk)
+        pro = ts.pro_api()
+        cal_df = pro.trade_cal(
+            exchange='', 
+            start_date=start_date.strftime('%Y%m%d'), 
+            end_date=end_date.strftime('%Y%m%d')
+        )
+        cal_df = cal_df[cal_df['is_open'] == 1]
+    else:
+        cal_df = pd.read_csv(td)
     trading_dates = list(map(str, cal_df['cal_date'].values))
     return_factors = {
         'CFFEX': float(argv['--CFFEX-return']),
@@ -326,8 +349,8 @@ if __name__ == "__main__":
         client_df['即时手续费返还'] = calc_return
         # 计算份额和净值
         value1, value2 = [1.,], [1.,]
-        units1 = [client_df['期初结存'][0] / value1[0], ]
-        units2 = [client_df['期初结存'][0] / value2[0], ]
+        units1 = [client_df['期末结存'][0] / value1[0], ]
+        units2 = [client_df['期末结存'][0] / value2[0], ]
         for i in range(1, len(client_df)):
             _dw_bf = client_df['银期出入金'][i]
             _balance_cf1 = client_df['期末结存'][i]
@@ -338,16 +361,29 @@ if __name__ == "__main__":
                 - client_df['郑商所手续费'][i] * return_factors['CZCE'] \
                 - client_df['大商所工业品手续费'][i] * return_factors['DCE-IND'] \
                 - client_df['大商所农产品手续费'][i] * return_factors['DCE-AGR']
-            if abs(_dw_bf) > EPSILON:
-                units1_delta = _dw_bf / value1[i-1]
-                units1.append(units1[i-1] + units1_delta)
-                units2_delta = _dw_bf / value2[i-1]
-                units2.append(units2[i-1] + units2_delta)
-            else:
+            if abs(_dw_bf) > EPSILON:  # 处理银期出入后份额变化
+                if value1[i-1] < EPSILON:  # 净值清零
+                    value1.append(1.)
+                    value2.append(1.)
+                    units1.append(_dw_bf / 1.)
+                    units2.append(_dw_bf / 1.)
+                else:
+                    units1_delta = _dw_bf / value1[i-1]
+                    units1.append(units1[i-1] + units1_delta)
+                    units2_delta = _dw_bf / value2[i-1]
+                    units2.append(units2[i-1] + units2_delta)
+                    if units1[i] < EPSILON:  # 份额清零
+                        value1.append(0.)
+                        value2.append(0.)
+                    else:
+                        value1.append(_balance_cf1 / units1[i])
+                        value2.append(_balance_cf2 / units2[i])
+            else:  # 保持份额
                 units1.append(units1[i-1])
                 units2.append(units2[i-1])
-            value1.append(_balance_cf1 / units1[i])
-            value2.append(_balance_cf2 / units2[i])
+                value1.append(_balance_cf1 / units1[i])
+                value2.append(_balance_cf2 / units2[i])
+
         client_df['实际份额'] = units1
         client_df['实际净值'] = value1
         client_df['即时份额'] = units2
@@ -357,14 +393,16 @@ if __name__ == "__main__":
             lambda x: datetime.strptime(x, '%Y%m%d'),
             set(trading_dates) - set(client_df['日期'].values.tolist()))
         ))
+        _start = True
         for date in dummy_dates:
             date_str = date.strftime('%Y%m%d')
-            if date == start_date:
+            if _start:  # 初始化第一行
                 dummy_row = {
                     '日期': date_str,
                     '账户': client_id,
                 }
                 client_df = client_df.append(dummy_row, ignore_index=True)
+                _start = False
             else:
                 prev_date_str = prev_trading_date(trading_dates, date_str)
                 prev_row = client_df[client_df['日期'] == prev_date_str].iloc[0]
@@ -388,8 +426,11 @@ if __name__ == "__main__":
             '账户': client_id,
             '日期': '合计',
             '期末结存': last_row['期末结存'],
+            '实际盈亏': last_row['实际盈亏'],
             '实际份额': last_row['实际份额'],
             '实际净值': last_row['实际净值'],
+            '即时手续费返还': client_df['即时手续费返还'].sum(),
+            '即时盈亏': last_row['即时盈亏'],
             '即时份额': last_row['即时份额'],
             '即时净值': last_row['即时净值'],
             '银期出入金': client_df['银期出入金'].sum(),
