@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
 COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', 
            '手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
-           '实际盈亏', '实际份额', '实际净值', '即时盈亏', '即时份额', '即时净值') # 结算总表
+           '实际盈亏', '实际份额', '实际净值', '即时手续费返还', '即时盈亏', '即时份额', '即时净值') # 结算总表
 COMMISSION = (
     ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),  # 中金所
     ('INE_COMM', ('SC',)),  # 上期原油
@@ -314,15 +314,16 @@ if __name__ == "__main__":
             print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
         # 计算盈亏
         total_pl1 = client_df['期末结存'] - client_df['期初结存'] - client_df['银期出入金']  # 当期实际盈亏
-        total_pl2 = total_pl1 - client_df['手续费返还'] \
-            - client_df['中金所手续费'] * return_factors['CFFEX'] \
+        calc_return = - client_df['中金所手续费'] * return_factors['CFFEX'] \
             - client_df['上期原油手续费'] * return_factors['INE'] \
             - client_df['上期所手续费'] * return_factors['SHFE'] \
             - client_df['郑商所手续费'] * return_factors['CZCE'] \
             - client_df['大商所工业品手续费'] * return_factors['DCE-IND'] \
-            - client_df['大商所农产品手续费'] * return_factors['DCE-AGR'] # 当期即时盈亏
+            - client_df['大商所农产品手续费'] * return_factors['DCE-AGR']
+        total_pl2 = total_pl1 - client_df['手续费返还'] + calc_return # 当期即时盈亏
         client_df['实际盈亏'] = total_pl1
         client_df['即时盈亏'] = total_pl2
+        client_df['即时手续费返还'] = calc_return
         # 计算份额和净值
         value1, value2 = [1.,], [1.,]
         units1 = [client_df['期初结存'][0] / value1[0], ]
@@ -424,6 +425,8 @@ if __name__ == "__main__":
             bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
             # 检查每日银期出入金
             for date in client_df['日期']:
+                if date == '合计':
+                    continue
                 bf_rows = bf_df['日期'] == date
                 bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
                 if bug_rows.sum() > 0:
