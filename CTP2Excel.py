@@ -465,7 +465,7 @@ if __name__ == "__main__":
         output_path = os.path.join(output_dir, '%s_%s_%s.xlsx' % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d')))
         writer = pd.ExcelWriter(output_path)
         client_df.to_excel(
-            writer, '结算汇总', index=False, columns=COLUMNS
+            writer, '结算汇总', index=False, columns=COLUMNS, freeze_panes=(1, 2)
         )
         # 银期出入金副表
         bf_array = []

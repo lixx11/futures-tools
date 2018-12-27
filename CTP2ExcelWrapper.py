@@ -104,7 +104,7 @@ if __name__ == "__main__":
     bf_df = pd.concat(bf_data)
     final_summary = os.path.join(output_dir, '结算总表_%s_%s.xlsx' % (start_date, end_date))
     writer = pd.ExcelWriter(final_summary)
-    client_df.to_excel(writer, '结算汇总', index=False)
+    client_df.to_excel(writer, '结算汇总', index=False, freeze_panes=(1, 2))
     bf_df.to_excel(writer, '银期转账', index=False)
     writer.save()
     print('=' * 80)
