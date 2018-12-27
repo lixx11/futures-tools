@@ -1,6 +1,8 @@
 .vscode/
 data/
 output/
+td.csv
+tk.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

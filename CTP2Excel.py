@@ -31,7 +31,7 @@ import tushare as ts
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
 COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', 
            '手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
-           '实际盈亏', '实际份额', '实际净值', '即时手续费返还', '即时盈亏', '即时份额', '即时净值') # 结算总表
+           '实际盈亏', '实际份额', '实际净值', '即时手续费返还', '即时期末结存', '即时盈亏', '即时份额', '即时净值') # 结算总表
 COMMISSION = (
     ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),  # 中金所
     ('INE_COMM', ('SC',)),  # 上期原油
@@ -358,16 +358,18 @@ if __name__ == "__main__":
         value1, value2 = [1.,], [1.,]
         units1 = [client_df['期末结存'][0] / value1[0], ]
         units2 = [client_df['期末结存'][0] / value2[0], ]
+        balance_cf2 = [client_df['期末结存'][0],]  # 即时期末结存
         for i in range(1, len(client_df)):
             _dw_bf = client_df['银期出入金'][i]
             _balance_cf1 = client_df['期末结存'][i]
-            _balance_cf2 = _balance_cf1 - client_df['手续费返还'][i] \
-                - client_df['中金所手续费'][i] * return_factors['CFFEX'] \
+            _calc_return = - client_df['中金所手续费'][i] * return_factors['CFFEX'] \
                 - client_df['上期原油手续费'][i] * return_factors['INE'] \
                 - client_df['上期所手续费'][i] * return_factors['SHFE'] \
                 - client_df['郑商所手续费'][i] * return_factors['CZCE'] \
                 - client_df['大商所工业品手续费'][i] * return_factors['DCE-IND'] \
                 - client_df['大商所农产品手续费'][i] * return_factors['DCE-AGR']
+            _balance_cf2 = balance_cf2[i-1] + total_pl2[i] + _dw_bf  # 当期即时期末结存
+            balance_cf2.append(_balance_cf2)
             if abs(_dw_bf) > EPSILON:  # 处理银期出入后份额变化
                 if value1[i-1] < EPSILON:  # 净值清零
                     value1.append(1.)
@@ -395,6 +397,7 @@ if __name__ == "__main__":
         client_df['实际净值'] = value1
         client_df['即时份额'] = units2
         client_df['即时净值'] = value2
+        client_df['即时期末结存'] = balance_cf2
         # 填充无交易日数据
         dummy_dates = sorted(list(map(
             lambda x: datetime.strptime(x, '%Y%m%d'),
@@ -421,7 +424,8 @@ if __name__ == "__main__":
                     '实际份额': prev_row['实际份额'],
                     '实际净值': prev_row['实际净值'],
                     '即时份额': prev_row['即时份额'],
-                    '即时净值': prev_row['即时净值']
+                    '即时净值': prev_row['即时净值'],
+                    '即时期末结存': prev_row['即时期末结存']
                 }
                 client_df = client_df.append(dummy_row, ignore_index=True)
         client_df['date'] = pd.to_datetime(client_df['日期'])
@@ -437,6 +441,7 @@ if __name__ == "__main__":
             '实际份额': last_row['实际份额'],
             '实际净值': last_row['实际净值'],
             '即时手续费返还': client_df['即时手续费返还'].sum(),
+            '即时期末结存': last_row['即时期末结存'],
             '即时盈亏': last_row['即时盈亏'],
             '即时份额': last_row['即时份额'],
             '即时净值': last_row['即时净值'],
