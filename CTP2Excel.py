@@ -92,6 +92,8 @@ def process_head(content):
             date_row = i
     if '国投安信' in content[0]:
         company = '国投安信'
+    else:
+        company = ''
     client_id = content[client_row].split('：')[1].strip().split()[0]
     client_name = content[client_row].split('：')[2].strip()
     date = content[date_row].split('：')[-1].strip()
