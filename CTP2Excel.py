@@ -26,6 +26,8 @@ import os
 import sys
 from datetime import datetime, timedelta
 import tushare as ts
+import matplotlib.pyplot as plt
+plt.style.use('ggplot')
 
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
@@ -462,11 +464,26 @@ if __name__ == "__main__":
         }
         client_df = client_df.append(total_row, ignore_index=True)
         # 写入结算主表
-        output_path = os.path.join(output_dir, '%s_%s_%s.xlsx' % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d')))
+        output_path = os.path.join(
+            output_dir, '%s_%s_%s.xlsx' 
+            % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
+        )
         writer = pd.ExcelWriter(output_path)
         client_df.to_excel(
             writer, '结算汇总', index=False, columns=COLUMNS, freeze_panes=(1, 2)
         )
+        # 作图
+        plot_path = os.path.join(
+            output_dir, '%s_%s_%s.png'
+            % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
+        )
+        fig, ax = plt.subplots(dpi=120, figsize=(12,6))
+        client_df.plot(kind='line', x='date', y='实际净值', label='real value', color='red', ax=ax)
+        client_df.plot(kind='line', x='date', y='即时净值', label='instant value', color='green', ax=ax)
+        ax.axhline(y=1.0, linestyle='--', color='black')
+        ax.set_title('Real profit: %.2fw, value: %.2f; Instant profit: %.2fw, value: %.2f' 
+            % (total_row['实际盈亏'], total_row['实际净值'], total_row['即时盈亏'], total_row['即时净值']))
+        plt.savefig(plot_path)
         # 银期出入金副表
         bf_array = []
         for stats in client_stats:
