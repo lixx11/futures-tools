@@ -1,0 +1,8 @@
+send_email: False
+server: 'smtp.139.com'
+sender:
+  account: 18810307602@139.com
+  passwd: LXX1530546985
+recipients:
+  - 1530546985@qq.com
+  - lixx11@csrc.ac.cn

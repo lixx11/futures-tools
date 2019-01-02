@@ -12,13 +12,10 @@ Options:
     --end-date=<DATE>       Specify end date [default: NOW].
     --TD=<FILE>             Specify trading dates file.
     --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
-    --CFFEX-return=<NUM>    Specify return factor of CFFEX commission [default: 0.].
-    --INE-return=<NUM>      Specify return factor of INE commission [default: 0.].
-    --SHFE-return=<NUM>     Specify return factor of SHFE commission [default: 0.32].
-    --CZCE-return=<NUM>     Specify return factor of CZCE commission [default: 0.44].
-    --DCE-IND-return=<NUM>  Specify return factor of DCE industrial products commission [default: 0.27].
-    --DCE-AGR-return=<NUM>  Specify return factor of DCE agricultural products [default: 0.36].
+    --return-file=<FILE>    Specify return configuration file [default: return.csv].
 """
+
+
 from docopt import docopt
 import numpy as np
 import pandas as pd
@@ -43,6 +40,7 @@ COMMISSION = (
     ('DCE_AGR_COMM', ('A', 'B', 'C', 'CS', 'JD', 'M', 'P', 'Y')) # 大商所8个农产品品种
 )
 EPSILON = 0.001  # 匹配误差容忍度
+
 
 def extract_data(filepath):
     with open(filepath) as f:
@@ -211,6 +209,9 @@ def process_transaction(content):
 
 
 def prev_trading_date(all_trading_dates, date):
+    """
+    获取所给日期前一个交易日
+    """
     all_trading_dates.sort(
         key=lambda d: datetime.strptime(d, '%Y%m%d')
     )
@@ -218,9 +219,35 @@ def prev_trading_date(all_trading_dates, date):
     return all_trading_dates[idx - 1]
 
 
+def parse_return_conf(path):
+    """
+    解析手续费返还配置文件
+    """
+    conf_df = pd.read_csv(path)
+    return_conf = []
+    for i in range(len(conf_df)):
+        start_date = str(int(conf_df.iloc[i]['start_date']))
+        end_date = str(int(conf_df.iloc[i]['end_date']))
+        dates = pd.date_range(start=start_date, end=end_date, closed='left')
+        _return_conf = pd.DataFrame({
+            'CFFEX': conf_df.iloc[i]['CFFEX'],
+            'INE': conf_df.iloc[i]['INE'],
+            'SHFE': conf_df.iloc[i]['SHFE'],
+            'CZCE': conf_df.iloc[i]['CZCE'],
+            'DCE_IND': conf_df.iloc[i]['DCE_IND'],
+            'DCE_AGR': conf_df.iloc[i]['DCE_AGR']
+        }, index=dates)
+        return_conf.append(_return_conf)
+    return_df = pd.concat(return_conf, verify_integrity=True)
+    return_df.index = return_df.index.map(lambda x: x.strftime('%Y%m%d'))
+    return return_df
+
+
 if __name__ == "__main__":
     argv = docopt(__doc__)
     CTP_files = argv['<CTP-file>']
+    return_file = argv['--return-file']
+    return_df = parse_return_conf(return_file)
     start_date = datetime.strptime(argv['--start-date'], '%Y%m%d')
     if argv['--end-date'] == 'NOW':
         end_date = datetime.now()
@@ -249,14 +276,6 @@ if __name__ == "__main__":
     else:
         cal_df = pd.read_csv(td)
     trading_dates = list(map(str, cal_df['cal_date'].values))
-    return_factors = {
-        'CFFEX': float(argv['--CFFEX-return']),
-        'INE': float(argv['--INE-return']),
-        'SHFE': float(argv['--SHFE-return']),
-        'CZCE': float(argv['--CZCE-return']),
-        'DCE-IND': float(argv['--DCE-IND-return']),
-        'DCE-AGR': float(argv['--DCE-AGR-return'])
-    }
     print('生成总结算单（共%d个文件）' % len(CTP_files))
     print('正在处理CTP文件...')
     records = []
@@ -346,16 +365,20 @@ if __name__ == "__main__":
             print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
         # 计算盈亏
         total_pl1 = client_df['期末结存'] - client_df['期初结存'] - client_df['银期出入金']  # 当期实际盈亏
-        calc_return = - client_df['中金所手续费'] * return_factors['CFFEX'] \
-            - client_df['上期原油手续费'] * return_factors['INE'] \
-            - client_df['上期所手续费'] * return_factors['SHFE'] \
-            - client_df['郑商所手续费'] * return_factors['CZCE'] \
-            - client_df['大商所工业品手续费'] * return_factors['DCE-IND'] \
-            - client_df['大商所农产品手续费'] * return_factors['DCE-AGR']
-        total_pl2 = total_pl1 - client_df['手续费返还'] + calc_return # 当期即时盈亏
+        calc_return = []
+        for i in range(len(client_df)):
+            _date = client_df.iloc[i]['日期']
+            _calc_return = - client_df['中金所手续费'][i] * return_df.loc[_date, 'CFFEX'] \
+                - client_df['上期原油手续费'][i] * return_df.loc[_date, 'INE'] \
+                - client_df['上期所手续费'][i] * return_df.loc[_date, 'SHFE'] \
+                - client_df['郑商所手续费'][i] * return_df.loc[_date, 'CZCE'] \
+                - client_df['大商所工业品手续费'][i] * return_df.loc[_date, 'DCE_IND'] \
+                - client_df['大商所农产品手续费'][i] * return_df.loc[_date, 'DCE_AGR']
+            calc_return.append(_calc_return)
+        client_df['即时手续费返还'] = calc_return
+        total_pl2 = total_pl1 - client_df['手续费返还'] + client_df['即时手续费返还'] # 当期即时盈亏
         client_df['实际盈亏'] = total_pl1
         client_df['即时盈亏'] = total_pl2
-        client_df['即时手续费返还'] = calc_return
         # 计算份额和净值
         value1, value2 = [1.,], [1.,]
         units1 = [client_df['期末结存'][0] / value1[0], ]
@@ -364,12 +387,7 @@ if __name__ == "__main__":
         for i in range(1, len(client_df)):
             _dw_bf = client_df['银期出入金'][i]
             _balance_cf1 = client_df['期末结存'][i]
-            _calc_return = - client_df['中金所手续费'][i] * return_factors['CFFEX'] \
-                - client_df['上期原油手续费'][i] * return_factors['INE'] \
-                - client_df['上期所手续费'][i] * return_factors['SHFE'] \
-                - client_df['郑商所手续费'][i] * return_factors['CZCE'] \
-                - client_df['大商所工业品手续费'][i] * return_factors['DCE-IND'] \
-                - client_df['大商所农产品手续费'][i] * return_factors['DCE-AGR']
+            _date = client_df['日期'][i]
             _balance_cf2 = balance_cf2[i-1] + total_pl2[i] + _dw_bf  # 当期即时期末结存
             balance_cf2.append(_balance_cf2)
             if abs(_dw_bf) > EPSILON:  # 处理银期出入后份额变化
