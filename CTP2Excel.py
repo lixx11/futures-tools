@@ -486,10 +486,24 @@ if __name__ == "__main__":
             output_dir, '%s_%s_%s.xlsx' 
             % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
         )
-        writer = pd.ExcelWriter(output_path)
+        writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
         client_df.to_excel(
             writer, '结算汇总', index=False, columns=COLUMNS, freeze_panes=(1, 2)
         )
+        workbook = writer.book
+        worksheet = writer.sheets['结算汇总']
+        for i, col in enumerate(COLUMNS):
+            if 11 <= i <= 16:
+                worksheet.set_column(i, i, 4)
+            else:
+                if client_df[col].dtype == 'float64':
+                    max_width = client_df[col].apply(lambda x: len(str('%.2f' % x))).max()
+                    max_width = max(max_width, len(col))
+                    worksheet.set_column(i, i, max_width+1)
+                else:
+                    max_width = client_df[col].apply(lambda x: len(str(x))).max()
+                    max_width = max(max_width, len(col))
+                    worksheet.set_column(i, i, max_width+1)
         # 作图
         plot_path = os.path.join(
             output_dir, '%s_%s_%s.png'

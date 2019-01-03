@@ -155,8 +155,23 @@ if __name__ == "__main__":
     bf_df['date'] = pd.to_datetime(bf_df['日期'])
     bf_df.sort_values(by='date', ascending=False, inplace=True)
     final_summary = os.path.join(output_dir, '结算总表_%s_%s.xlsx' % (start_date, end_date))
-    writer = pd.ExcelWriter(final_summary)
+    writer = pd.ExcelWriter(final_summary, engine='xlsxwriter')
     client_df.to_excel(writer, '结算汇总', columns=COLUMNS, index=False, freeze_panes=(1, 1))
+    # 调整列宽
+    workbook = writer.book
+    worksheet = writer.sheets['结算汇总']
+    for i, col in enumerate(COLUMNS):
+            if 10 <= i <= 15:
+                worksheet.set_column(i, i, 4)
+            else:
+                if client_df[col].dtype == 'float64':
+                    max_width = client_df[col].apply(lambda x: len(str('%.2f' % x))).max()
+                    max_width = max(max_width, len(col))
+                    worksheet.set_column(i, i, max_width+1)
+                else:
+                    max_width = client_df[col].apply(lambda x: len(str(x))).max()
+                    max_width = max(max_width, len(col))
+                    worksheet.set_column(i, i, max_width+1)
     bf_df.to_excel(writer, '银期转账', index=False, columns=('日期', '入金', '出金'))
     writer.save()
     print('=' * 80)
