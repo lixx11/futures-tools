@@ -7,12 +7,12 @@ Usage:
 
 Options:
     -h --help               Show this screen.
-    -e --ext=<extension>    Specify extension of CTP files [default: csv].
+    -s --start-date=<DATE>  Specify start date [default: 19990101].
+    -e --end-date=<DATE>    Specify end date [default: NOW].
     -o --output=<folder>    Specify output directory [default: output].
-    --start-date=<DATE>     Specify start date [default: 19990101].
-    --end-date=<DATE>       Specify end date [default: NOW].
+    --ext=<extension>       Specify extension of CTP files [default: csv].
     --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
-    --return-file=<FILE>    Specify return configuration file [default: return.csv].
+    --rebate-file=<FILE>    Specify rebate configuration file [default: rebate.csv].
     --email-conf=<FILE>     Specify email configuration file [default: email.yml].
 """
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
             '--end-date', end_date,
             '--TD', TD_FILE,
             '--TK', tk,
-            '--return-file', argv['--return-file'],
+            '--rebate-file', argv['--rebate-file'],
             ] + raw_files,
             capture_output=True
         )
@@ -113,6 +113,35 @@ if __name__ == "__main__":
     client_df = pd.DataFrame(total_data)
     client_df['实际净值'] = client_df['期末结存'] / client_df['实际份额']
     client_df['即时净值'] = client_df['即时期末结存'] / client_df['即时份额']
+    # 增加合计行
+    last_row = client_df.iloc[-1]
+    total_row = {
+        '日期': '合计',
+        '期末结存': last_row['期末结存'],
+        '实际盈亏': last_row['实际盈亏'],
+        '实际份额': last_row['实际份额'],
+        '实际净值': last_row['实际净值'],
+        '即时手续费返还': client_df['即时手续费返还'].sum(),
+        '即时期末结存': last_row['即时期末结存'],
+        '即时盈亏': last_row['即时盈亏'],
+        '即时份额': last_row['即时份额'],
+        '即时净值': last_row['即时净值'],
+        '银期出入金': client_df['银期出入金'].sum(),
+        '手续费返还': client_df['手续费返还'].sum(),
+        '利息返还': client_df['利息返还'].sum(),
+        '中金所申报费': client_df['中金所申报费'].sum(),
+        '出入金合计': client_df['出入金合计'].sum(),
+        '平仓盈亏': client_df['平仓盈亏'].sum(),
+        '盯市盈亏': client_df['盯市盈亏'].sum(),
+        '手续费': client_df['手续费'].sum(),
+        '中金所手续费': client_df['中金所手续费'].sum(),
+        '上期原油手续费': client_df['上期原油手续费'].sum(),
+        '上期所手续费': client_df['上期所手续费'].sum(),
+        '郑商所手续费': client_df['郑商所手续费'].sum(),
+        '大商所工业品手续费': client_df['大商所工业品手续费'].sum(),
+        '大商所农产品手续费': client_df['大商所农产品手续费'].sum(),
+    }
+    client_df = client_df.append(total_row, ignore_index=True)
     # 银期转账
     total_data = []
     for date in dates:
@@ -123,6 +152,8 @@ if __name__ == "__main__":
         }
         total_data.append(row_dict)
     bf_df = pd.DataFrame(total_data)
+    bf_df['date'] = pd.to_datetime(bf_df['日期'])
+    bf_df.sort_values(by='date', ascending=False, inplace=True)
     final_summary = os.path.join(output_dir, '结算总表_%s_%s.xlsx' % (start_date, end_date))
     writer = pd.ExcelWriter(final_summary)
     client_df.to_excel(writer, '结算汇总', columns=COLUMNS, index=False, freeze_panes=(1, 1))
@@ -143,23 +174,33 @@ if __name__ == "__main__":
         )
 
         import smtplib
+        import mimetypes
         from email.mime.application import MIMEApplication
         from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
         from email.utils import COMMASPACE, formatdate
-        msg = MIMEMultipart()
-        msg['From'] = email_conf['sender']['account']
-        msg['To'] = COMMASPACE.join(email_conf['recipients'])
-        msg['Date'] = formatdate(localtime=True)
-        msg['Subject'] = '结算表'
+        from email.header import Header
+        from email import encoders
 
-        with open(archive_file, 'r') as f:
-            part = MIMEApplication(f.read(), Name=os.path.basename(archive_file))
-        part['Content-Disposition'] = 'attachment; filename="%s"' % os.path.basename(archive_file)
-        msg.attach(part)
+        outer  = MIMEMultipart()
+        outer ['From'] = email_conf['sender']['account']
+        outer ['To'] = COMMASPACE.join(email_conf['recipients'])
+        outer ['Date'] = formatdate(localtime=True)
+        outer ['Subject'] = Header('结算表', 'utf-8')
+
+        ctype, encoding = mimetypes.guess_type(archive_file)
+        if ctype is None or encoding is not None:
+            ctype = 'application/octet-stream'
+        maintype, subtype = ctype.split('/', 1)
+        with open(archive_file, 'rb') as fp:
+            msg = MIMEBase(maintype, subtype)
+            msg.set_payload(fp.read())
+            encoders.encode_base64(msg)
+        msg.add_header('Content-Disposition', 'attachment', filename=os.path.basename(archive_file))
+        outer.attach(msg)
 
         server = smtplib.SMTP(email_conf['server'])
 
         server.login(email_conf['sender']['account'], email_conf['sender']['passwd'])
-        server.sendmail(email_conf['sender']['account'], email_conf['recipients'], msg.as_string())
-        server.close()
+        server.sendmail(email_conf['sender']['account'], email_conf['recipients'], outer.as_string())
+        server.quit()

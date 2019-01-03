@@ -1,4 +1,4 @@
-send_email: False
+send_email: True
 server: 'smtp.139.com'
 sender:
   account: 18810307602@139.com

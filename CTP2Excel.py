@@ -8,11 +8,11 @@ Usage:
 Options:
     -h --help               Show this screen.
     -o --output=<folder>    Specify output directory [default: output].
-    --start-date=<DATE>     Specify start date [default: 19900101].
-    --end-date=<DATE>       Specify end date [default: NOW].
+    -s --start-date=<DATE>  Specify start date [default: 19900101].
+    -e --end-date=<DATE>    Specify end date [default: NOW].
     --TD=<FILE>             Specify trading dates file.
     --TK=<TOKEN>            Specify tushare-token for trading calendar [default: xxli].
-    --return-file=<FILE>    Specify return configuration file [default: return.csv].
+    --rebate-file=<FILE>    Specify return configuration file [default: rebate.csv].
 """
 
 
@@ -219,17 +219,17 @@ def prev_trading_date(all_trading_dates, date):
     return all_trading_dates[idx - 1]
 
 
-def parse_return_conf(path):
+def parse_rebate_conf(path):
     """
     解析手续费返还配置文件
     """
     conf_df = pd.read_csv(path)
-    return_conf = []
+    rebate_conf = []
     for i in range(len(conf_df)):
         start_date = str(int(conf_df.iloc[i]['start_date']))
         end_date = str(int(conf_df.iloc[i]['end_date']))
         dates = pd.date_range(start=start_date, end=end_date, closed='left')
-        _return_conf = pd.DataFrame({
+        _rebate_conf = pd.DataFrame({
             'CFFEX': conf_df.iloc[i]['CFFEX'],
             'INE': conf_df.iloc[i]['INE'],
             'SHFE': conf_df.iloc[i]['SHFE'],
@@ -237,17 +237,17 @@ def parse_return_conf(path):
             'DCE_IND': conf_df.iloc[i]['DCE_IND'],
             'DCE_AGR': conf_df.iloc[i]['DCE_AGR']
         }, index=dates)
-        return_conf.append(_return_conf)
-    return_df = pd.concat(return_conf, verify_integrity=True)
-    return_df.index = return_df.index.map(lambda x: x.strftime('%Y%m%d'))
-    return return_df
+        rebate_conf.append(_rebate_conf)
+    rebate_df = pd.concat(rebate_conf, verify_integrity=True)
+    rebate_df.index = rebate_df.index.map(lambda x: x.strftime('%Y%m%d'))
+    return rebate_df
 
 
 if __name__ == "__main__":
     argv = docopt(__doc__)
     CTP_files = argv['<CTP-file>']
-    return_file = argv['--return-file']
-    return_df = parse_return_conf(return_file)
+    rebate_file = argv['--rebate-file']
+    rebate_df = parse_rebate_conf(rebate_file)
     start_date = datetime.strptime(argv['--start-date'], '%Y%m%d')
     if argv['--end-date'] == 'NOW':
         end_date = datetime.now()
@@ -318,15 +318,15 @@ if __name__ == "__main__":
                 dw_bf -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
             row_dict['银期出入金'] = dw_bf
             # 处理手续费返还
-            dw_return_fee = 0.
+            dw_rebate_fee = 0.
             if 'dw_array' in stats:
-                dw_return_fee += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '手续费返还'])
-            row_dict['手续费返还'] = dw_return_fee
+                dw_rebate_fee += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '手续费返还'])
+            row_dict['手续费返还'] = dw_rebate_fee
             # 处理利息返还
-            dw_return_interest = 0.
+            dw_rebate_interest = 0.
             if 'dw_array' in stats:
-                dw_return_interest += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '利息返还'])
-            row_dict['利息返还'] = dw_return_interest
+                dw_rebate_interest += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '利息返还'])
+            row_dict['利息返还'] = dw_rebate_interest
             # 处理中金所申报费
             dw_cffex_fee = 0. 
             if 'dw_array' in stats:
@@ -365,17 +365,17 @@ if __name__ == "__main__":
             print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
         # 计算盈亏
         total_pl1 = client_df['期末结存'] - client_df['期初结存'] - client_df['银期出入金']  # 当期实际盈亏
-        calc_return = []
+        calc_rebate = []
         for i in range(len(client_df)):
             _date = client_df.iloc[i]['日期']
-            _calc_return = - client_df['中金所手续费'][i] * return_df.loc[_date, 'CFFEX'] \
-                - client_df['上期原油手续费'][i] * return_df.loc[_date, 'INE'] \
-                - client_df['上期所手续费'][i] * return_df.loc[_date, 'SHFE'] \
-                - client_df['郑商所手续费'][i] * return_df.loc[_date, 'CZCE'] \
-                - client_df['大商所工业品手续费'][i] * return_df.loc[_date, 'DCE_IND'] \
-                - client_df['大商所农产品手续费'][i] * return_df.loc[_date, 'DCE_AGR']
-            calc_return.append(_calc_return)
-        client_df['即时手续费返还'] = calc_return
+            _calc_rebate = - client_df['中金所手续费'][i] * rebate_df.loc[_date, 'CFFEX'] \
+                - client_df['上期原油手续费'][i] * rebate_df.loc[_date, 'INE'] \
+                - client_df['上期所手续费'][i] * rebate_df.loc[_date, 'SHFE'] \
+                - client_df['郑商所手续费'][i] * rebate_df.loc[_date, 'CZCE'] \
+                - client_df['大商所工业品手续费'][i] * rebate_df.loc[_date, 'DCE_IND'] \
+                - client_df['大商所农产品手续费'][i] * rebate_df.loc[_date, 'DCE_AGR']
+            calc_rebate.append(_calc_rebate)
+        client_df['即时手续费返还'] = calc_rebate
         total_pl2 = total_pl1 - client_df['手续费返还'] + client_df['即时手续费返还'] # 当期即时盈亏
         client_df['实际盈亏'] = total_pl1
         client_df['即时盈亏'] = total_pl2
