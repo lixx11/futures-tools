@@ -165,7 +165,7 @@ def process_deposit_withdrawal(content, company):
             dw_type = '利息返还'
         if len(comment) == 0 and company == '国投安信':
             dw_type = '银期转账'
-        if '上海招行' in comment and comanpy == '兴证期货':
+        if '上海招行' in comment and company == '兴证期货':
             dw_type = '银期转账'
         dw_array.append({
             'date': date.strip(),
