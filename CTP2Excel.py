@@ -92,6 +92,8 @@ def process_head(content):
             date_row = i
     if '国投安信' in content[0]:
         company = '国投安信'
+    elif '兴证期货' in content[0]:
+        company = '兴证期货'
     else:
         company = ''
     client_id = content[client_row].split('：')[1].strip().split()[0]
@@ -162,6 +164,8 @@ def process_deposit_withdrawal(content, company):
         if '利息' in comment:
             dw_type = '利息返还'
         if len(comment) == 0 and company == '国投安信':
+            dw_type = '银期转账'
+        if '上海招行' in comment and comanpy == '兴证期货':
             dw_type = '银期转账'
         dw_array.append({
             'date': date.strip(),
