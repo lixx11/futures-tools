@@ -29,7 +29,7 @@ plt.style.use('ggplot')
 
 TABLES = ('资金状况', '成交记录', '出入金明细', '平仓明细', '持仓明细', '持仓汇总')
 COLUMNS = ('账户', '日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', 
-           '手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
+           '手续费', '交割手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
            '实际盈亏', '实际份额', '实际净值', '即时手续费返还', '即时期末结存', '即时盈亏', '即时份额', '即时净值') # 结算总表
 COMMISSION = (
     ('CFFEX_COMM', ('IF', 'IC', 'IH', 'TS', 'TF', 'T')),  # 中金所
@@ -123,6 +123,8 @@ def process_summary(content):
             mtm_pl_row = i
         if '手 续 费' in content[i]:
             commission_row = i
+        if '交割手续费' in content[i]:
+            delivery_row = i
         if '期末结存' in content[i]:
             balance_cf_row = i
     balance_bf = float(content[balance_bf_row].split('：')[1].strip().split()[0])  # 期初结存
@@ -130,6 +132,7 @@ def process_summary(content):
     realized_pl = float(content[realized_pl_row].split('：')[1].strip().split()[0])  # 平仓盈亏
     mtm_pl = float(content[mtm_pl_row].split('：')[1].strip().split()[0])  # 盯市盈亏
     commission = -float(content[commission_row].split('：')[1].strip().split()[0])  # 手续费
+    delivery_fee = -float(content[delivery_row].split('：')[1].strip().split()[0])  # 交割手续费
     balance_cf = float(content[balance_cf_row].split('：')[-1].strip())  # 期末结存
     total_delta = total_deposit_withdrawal + realized_pl + mtm_pl + commission  # 当期总流水
     if abs(balance_bf + total_delta - balance_cf) > EPSILON:  # 检查期初结存+总流水与期末结存是否匹配
@@ -141,6 +144,7 @@ def process_summary(content):
         'realized_pl': realized_pl,
         'mtm_pl': mtm_pl,
         'commission': commission,
+        'delivery_fee': delivery_fee,
         'balance_cf': balance_cf,
     }
     return stats
@@ -314,6 +318,7 @@ if __name__ == "__main__":
             row_dict['平仓盈亏'] = stats['realized_pl']
             row_dict['盯市盈亏'] = stats['mtm_pl']
             row_dict['手续费'] = stats['commission']
+            row_dict['交割手续费'] = stats['delivery_fee']
             row_dict['期末结存'] = stats['balance_cf']
             # 处理银期出入金
             dw_bf = 0.
@@ -345,6 +350,7 @@ if __name__ == "__main__":
             client_data.append(row_dict)
         # 总表
         client_df = pd.DataFrame(client_data, columns=COLUMNS)
+        print(client_df)
         client_df['date'] = pd.to_datetime(client_df['日期'])
         client_df.sort_values(by='date', ascending=True, inplace=True)
         client_df.reset_index(inplace=True)
@@ -477,6 +483,7 @@ if __name__ == "__main__":
             '平仓盈亏': client_df['平仓盈亏'].sum(),
             '盯市盈亏': client_df['盯市盈亏'].sum(),
             '手续费': client_df['手续费'].sum(),
+            '交割手续费': client_df['交割手续费'].sum(),
             '中金所手续费': client_df['中金所手续费'].sum(),
             '上期原油手续费': client_df['上期原油手续费'].sum(),
             '上期所手续费': client_df['上期所手续费'].sum(),

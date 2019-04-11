@@ -31,7 +31,7 @@ import yaml
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 TD_FILE = 'td.csv'  # trading dates csv file
 COLUMNS = ('日期', '期初结存', '银期出入金', '手续费返还', '利息返还', '中金所申报费', '出入金合计', '平仓盈亏', '盯市盈亏', 
-           '手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
+           '手续费', '交割手续费', '中金所手续费', '上期原油手续费', '上期所手续费', '郑商所手续费', '大商所工业品手续费', '大商所农产品手续费', '期末结存',
            '实际盈亏', '实际份额', '实际净值', '即时手续费返还', '即时期末结存', '即时盈亏', '即时份额', '即时净值') # 结算总表
 
 
@@ -63,6 +63,7 @@ if __name__ == "__main__":
     print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
     print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
+    print(companies)
     for company in companies:
         print('处理%s期货公司数据' % company)
         raw_files = glob('%s/%s/*/*.%s' % (raw_dir, company, ext))
@@ -134,6 +135,7 @@ if __name__ == "__main__":
         '平仓盈亏': client_df['平仓盈亏'].sum(),
         '盯市盈亏': client_df['盯市盈亏'].sum(),
         '手续费': client_df['手续费'].sum(),
+        '交割手续费': client_df['交割手续费'].sum(),
         '中金所手续费': client_df['中金所手续费'].sum(),
         '上期原油手续费': client_df['上期原油手续费'].sum(),
         '上期所手续费': client_df['上期所手续费'].sum(),
