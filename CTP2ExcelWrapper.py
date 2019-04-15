@@ -63,30 +63,31 @@ if __name__ == "__main__":
     print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
     print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
-    print(companies)
     for company in companies:
         print('处理%s期货公司数据' % company)
-        raw_files = glob('%s/%s/*/*.%s' % (raw_dir, company, ext))
-        if len(raw_files) == 0:
-            print('WARNING! 未找到%s内的结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
-            continue
-        company_dir = os.path.join(output_dir, company)
-        res = subprocess.run([
-            'python', '%s/CTP2Excel.py' % BASE_PATH,
-            '-o', company_dir,
-            '--start-date', start_date,
-            '--end-date', end_date,
-            '--TD', TD_FILE,
-            '--TK', tk,
-            '--rebate-file', argv['--rebate-file'],
-            ] + raw_files,
-            capture_output=True
-        )
-        print(res.stdout.decode('utf-8'), res.stderr.decode('utf-8'))
-        print('-' * 80)
+        clients = next(os.walk(os.path.join(raw_dir, company)))[1]
+        for client in clients:
+            raw_files = glob('%s/%s/%s/*.%s' % (raw_dir, company, client, ext))
+            if len(raw_files) == 0:
+                print('WARNING! 未找到%s内的结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
+                continue
+            task_dir = os.path.join(output_dir, company, client)
+            res = subprocess.run([
+                'python', '%s/CTP2Excel.py' % BASE_PATH,
+                '-o', task_dir,
+                '--start-date', start_date,
+                '--end-date', end_date,
+                '--TD', TD_FILE,
+                '--TK', tk,
+                '--rebate-file', argv['--rebate-file'],
+                ] + raw_files,
+                capture_output=True
+            )
+            print(res.stdout.decode('utf-8'), res.stderr.decode('utf-8'))
+            print('-' * 80)
     
     # 生成汇总报表
-    client_files = glob('%s/*/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
+    client_files = glob('%s/*/*/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
     client_data = []
     bf_data = []
     for client_file in client_files:

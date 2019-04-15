@@ -286,19 +286,22 @@ if __name__ == "__main__":
     trading_dates = list(map(str, cal_df['cal_date'].values))
     print('生成总结算单（共%d个文件）' % len(CTP_files))
     print('正在处理CTP文件...')
-    records = []
     all_stats = []
+    all_dates = []
+    
+    # 移除不在指定日期范围内的CTP文件
+    CTP_files = [CTP_file for CTP_file in CTP_files 
+        if start_date <= datetime.strptime(os.path.basename(CTP_file).split('.')[0].split('_')[-1], '%Y%m%d') <= end_date]
+    CTP_files.sort(key=lambda fpath: datetime.strptime(os.path.basename(fpath).split('.')[0].split('_')[-1], '%Y%m%d'))
     for CTP_file in CTP_files:
         stats = extract_data(CTP_file)
-        record = (stats['client_id'], stats['date'])
-        if record in records:
+        if stats['date'] in all_dates:
             print('跳过重复的CTP文件：%s' % CTP_file)
             continue
-        this_date = datetime.strptime(stats['date'], '%Y%m%d')
-        if this_date < start_date or this_date > end_date:
-            print('跳过不在日期范围内的CTP文件：%s' % CTP_file)
-            continue
-        records.append(record)
+        all_dates.append(stats['date'])
+        all_stats.append(stats)
+    # 处理指定日期范围内完全无交易的情况
+    if len(all_stats) == 0:
         all_stats.append(stats)
     client_ids = np.unique([stats['client_id'] for stats in all_stats])
     # 数据汇总输出到Excel文件中
@@ -350,7 +353,6 @@ if __name__ == "__main__":
             client_data.append(row_dict)
         # 总表
         client_df = pd.DataFrame(client_data, columns=COLUMNS)
-        print(client_df)
         client_df['date'] = pd.to_datetime(client_df['日期'])
         client_df.sort_values(by='date', ascending=True, inplace=True)
         client_df.reset_index(inplace=True)
@@ -437,10 +439,26 @@ if __name__ == "__main__":
         for date in dummy_dates:
             date_str = date.strftime('%Y%m%d')
             if _start:  # 初始化第一行
-                dummy_row = {
-                    '日期': date_str,
-                    '账户': client_id,
-                }
+                if datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d') < date:
+                    prev_row = client_df.iloc[0]
+                    dummy_row = {
+                        '日期': date_str,
+                        '账户': client,
+                        '期初结存': prev_row['期末结存'],
+                        '期末结存': prev_row['期末结存'],
+                        '实际份额': prev_row['实际份额'],
+                        '实际净值': prev_row['实际净值'],
+                        '即时份额': prev_row['即时份额'],
+                        '即时净值': prev_row['即时净值'],
+                        '即时期末结存': prev_row['即时期末结存']
+                    }
+                    client_df = client_df.append(dummy_row, ignore_index=True)
+                else:
+                    print('else')
+                    dummy_row = {
+                        '日期': date_str,
+                        '账户': client_id,
+                    }
                 client_df = client_df.append(dummy_row, ignore_index=True)
                 _start = False
             else:
@@ -461,6 +479,7 @@ if __name__ == "__main__":
         client_df['date'] = pd.to_datetime(client_df['日期'])
         client_df.sort_values(by='date', ascending=True, inplace=True)
         client_df.fillna(0, inplace=True)
+        client_df = client_df[client_df['日期'].apply(lambda d: datetime.strptime(d, '%Y%m%d')) >= start_date]
         # 增加合计行
         last_row = client_df.iloc[-1]
         total_row = {
