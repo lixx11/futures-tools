@@ -63,10 +63,11 @@ if __name__ == "__main__":
     print('从%s获取原始CTP文件并将总结算单写入%s' % (raw_dir, output_dir))
     print('=' * 80)
     companies = next(os.walk(raw_dir))[1]
-    for company in companies:
-        print('处理%s期货公司数据' % company)
+    for i, company in enumerate(companies):
+        print('%d: 处理%s期货公司数据' % (i, company))
         clients = next(os.walk(os.path.join(raw_dir, company)))[1]
-        for client in clients:
+        for j, client in enumerate(clients):
+            print('%d.%d: 处理%s账号数据' % (i, j, client))
             raw_files = glob('%s/%s/%s/*.%s' % (raw_dir, company, client, ext))
             if len(raw_files) == 0:
                 print('WARNING! 未找到%s内的结算单文件，请检查文件后缀以及文件目录结构是否符合标准！' % company)
@@ -88,6 +89,10 @@ if __name__ == "__main__":
     
     # 生成汇总报表
     client_files = glob('%s/*/*/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
+    if len(client_files) == 0:
+        print('WARNING! 未发现任何结算文件，无法生成汇总报表！！！')
+        sys.exit()
+
     client_data = []
     bf_data = []
     for client_file in client_files:
@@ -180,9 +185,9 @@ if __name__ == "__main__":
     print('=' * 80)
     print('总结算单已写入%s' % final_summary)
     # 发送邮件
-    email_conf = yaml.load(open(argv['--email-conf'], 'r'))
+    email_conf = yaml.load(open(argv['--email-conf'], 'r'), Loader=yaml.FullLoader)
     if email_conf['send_email']:
-        result_files = glob('%s/*/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
+        result_files = glob('%s/*/*/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
         result_files += glob('%s/*_%s_%s.xlsx' % (output_dir, start_date, end_date))
         archive_file = '%s_%s.tar' % (start_date, end_date)
         res = subprocess.run([
@@ -217,8 +222,11 @@ if __name__ == "__main__":
         msg.add_header('Content-Disposition', 'attachment', filename=os.path.basename(archive_file))
         outer.attach(msg)
 
-        server = smtplib.SMTP(email_conf['server'])
-
-        server.login(email_conf['sender']['account'], email_conf['sender']['passwd'])
-        server.sendmail(email_conf['sender']['account'], email_conf['recipients'], outer.as_string())
-        server.quit()
+        try:
+            server = smtplib.SMTP(email_conf['server'])
+            server.login(email_conf['sender']['account'], email_conf['sender']['passwd'])
+            server.sendmail(email_conf['sender']['account'], email_conf['recipients'], outer.as_string())
+            server.quit()
+            print('邮件发送成功！')
+        except:
+            print('邮件发送失败！')

@@ -284,15 +284,18 @@ if __name__ == "__main__":
     else:
         cal_df = pd.read_csv(td)
     trading_dates = list(map(str, cal_df['cal_date'].values))
-    print('生成总结算单（共%d个文件）' % len(CTP_files))
-    print('正在处理CTP文件...')
     all_stats = []
     all_dates = []
     
-    # 移除不在指定日期范围内的CTP文件
+    # 移除不在指定日期范围内的CTP文件（根据文件名）
     CTP_files = [CTP_file for CTP_file in CTP_files 
         if start_date <= datetime.strptime(os.path.basename(CTP_file).split('.')[0].split('_')[-1], '%Y%m%d') <= end_date]
+    if len(CTP_files) == 0:
+        print('指定日期内无CTP文件，跳过。')
+        sys.exit()
+
     CTP_files.sort(key=lambda fpath: datetime.strptime(os.path.basename(fpath).split('.')[0].split('_')[-1], '%Y%m%d'))
+    print('正在处理CTP文件（共%d个文件）...' % len(CTP_files))
     for CTP_file in CTP_files:
         stats = extract_data(CTP_file)
         if stats['date'] in all_dates:
@@ -304,166 +307,146 @@ if __name__ == "__main__":
     if len(all_stats) == 0:
         all_stats.append(stats)
     client_ids = np.unique([stats['client_id'] for stats in all_stats])
+    if len(client_ids) > 1:
+        print('WARNING! 发现超过1个账号结算单，仅处理%s账号文件' % client_ids[0])
+    client_id = client_ids[0]
+
     # 数据汇总输出到Excel文件中
     output_dir = argv['--output']
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
-    for client_id in client_ids:  # 分别处理每个客户结算数据
-        client_stats =[stats for stats in all_stats if stats['client_id'] == client_id]
-        client = '%s-%s' % (client_stats[0]['client_id'], client_stats[0]['client_name'])
-        client_data = []
-        for stats in client_stats:
-            row_dict = {}
-            row_dict['账户'] = stats['client_id']
-            row_dict['日期'] = stats['date']
-            row_dict['期初结存'] = stats['balance_bf']
-            row_dict['出入金合计'] = stats['total_deposit_withdrawal']
-            row_dict['平仓盈亏'] = stats['realized_pl']
-            row_dict['盯市盈亏'] = stats['mtm_pl']
-            row_dict['手续费'] = stats['commission']
-            row_dict['交割手续费'] = stats['delivery_fee']
-            row_dict['期末结存'] = stats['balance_cf']
-            # 处理银期出入金
-            dw_bf = 0.
-            if 'dw_array' in stats:
-                dw_bf += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
-                dw_bf -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
-            row_dict['银期出入金'] = dw_bf
-            # 处理手续费返还
-            dw_rebate_fee = 0.
-            if 'dw_array' in stats:
-                dw_rebate_fee += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '手续费返还'])
-            row_dict['手续费返还'] = dw_rebate_fee
-            # 处理利息返还
-            dw_rebate_interest = 0.
-            if 'dw_array' in stats:
-                dw_rebate_interest += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '利息返还'])
-            row_dict['利息返还'] = dw_rebate_interest
-            # 处理中金所申报费
-            dw_cffex_fee = 0. 
-            if 'dw_array' in stats:
-                dw_cffex_fee -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '中金所申报费'])
-            row_dict['中金所申报费'] = dw_cffex_fee
-            row_dict['中金所手续费'] = stats['CFFEX_COMM'] if 'CFFEX_COMM' in stats else 0.
-            row_dict['上期原油手续费'] = stats['INE_COMM'] if 'INE_COMM' in stats else 0.
-            row_dict['上期所手续费'] = stats['SHFE_COMM'] if 'SHFE_COMM' in stats else 0. 
-            row_dict['郑商所手续费'] = stats['CZCE_COMM'] if 'CZCE_COMM' in stats else 0. 
-            row_dict['大商所工业品手续费'] = stats['DCE_IND_COMM'] if 'DCE_IND_COMM' in stats else 0. 
-            row_dict['大商所农产品手续费'] = stats['DCE_AGR_COMM'] if 'DCE_AGR_COMM' in stats else 0.
-            client_data.append(row_dict)
-        # 总表
-        client_df = pd.DataFrame(client_data, columns=COLUMNS)
-        client_df['date'] = pd.to_datetime(client_df['日期'])
-        client_df.sort_values(by='date', ascending=True, inplace=True)
-        client_df.reset_index(inplace=True)
-        # 检查出入金
-        bug_rows = ((
-            client_df['银期出入金'] + client_df['手续费返还'] + client_df['利息返还'] + client_df['中金所申报费'] - client_df['出入金合计']
-            ).abs() > EPSILON
-        )
-        if bug_rows.sum() > 0:
-            print('WARNING! 出入金不匹配，请检查下列日期出入金数据：\n %s' % str(client_df[bug_rows]))
-        # 检查期初结存 + 当期总流水 与 期末结存
-        bug_rows = ((
-            client_df['期初结存'] + client_df['出入金合计'] + client_df['平仓盈亏'] + client_df['盯市盈亏'] + client_df['手续费'] - client_df['期末结存']
-            ).abs() > EPSILON
-        )
-        if bug_rows.sum() > 0:
-            print('WARNING! 期初结存+当期流水与期末结存不匹配，请检查下列日期数据：\n %s' % str(client_df[~bug_rows]))
-        # 检查期末结存与下期初结存
-        bug_rows = np.where(np.abs(client_df['期末结存'].values[:-1] - client_df['期初结存'].values[1:]) > EPSILON)[0].tolist()
-        if len(bug_rows) > 0:
-            bug_rows.append(max(bug_rows) + 1)
-            print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
-        # 计算盈亏
-        total_pl1 = client_df['期末结存'] - client_df['期初结存'] - client_df['银期出入金']  # 当期实际盈亏
-        calc_rebate = []
-        for i in range(len(client_df)):
-            _date = client_df.iloc[i]['日期']
-            _calc_rebate = - client_df['中金所手续费'][i] * rebate_df.loc[_date, 'CFFEX'] \
-                - client_df['上期原油手续费'][i] * rebate_df.loc[_date, 'INE'] \
-                - client_df['上期所手续费'][i] * rebate_df.loc[_date, 'SHFE'] \
-                - client_df['郑商所手续费'][i] * rebate_df.loc[_date, 'CZCE'] \
-                - client_df['大商所工业品手续费'][i] * rebate_df.loc[_date, 'DCE_IND'] \
-                - client_df['大商所农产品手续费'][i] * rebate_df.loc[_date, 'DCE_AGR']
-            calc_rebate.append(_calc_rebate)
-        client_df['即时手续费返还'] = calc_rebate
-        total_pl2 = total_pl1 - client_df['手续费返还'] + client_df['即时手续费返还'] # 当期即时盈亏
-        client_df['实际盈亏'] = total_pl1
-        client_df['即时盈亏'] = total_pl2
-        # 计算份额和净值
-        value1, value2 = [1.,], [1.,]
-        units1 = [client_df['期末结存'][0] / value1[0], ]
-        units2 = [client_df['期末结存'][0] / value2[0], ]
-        balance_cf2 = [client_df['期末结存'][0],]  # 即时期末结存
-        for i in range(1, len(client_df)):
-            _dw_bf = client_df['银期出入金'][i]
-            _balance_cf1 = client_df['期末结存'][i]
-            _date = client_df['日期'][i]
-            _balance_cf2 = balance_cf2[i-1] + total_pl2[i] + _dw_bf  # 当期即时期末结存
-            balance_cf2.append(_balance_cf2)
-            if abs(_dw_bf) > EPSILON:  # 处理银期出入后份额变化
-                if value1[i-1] < EPSILON:  # 净值清零
-                    value1.append(1.)
-                    value2.append(1.)
-                    units1.append(_dw_bf / 1.)
-                    units2.append(_dw_bf / 1.)
-                else:
-                    units1_delta = _dw_bf / value1[i-1]
-                    units1.append(units1[i-1] + units1_delta)
-                    units2_delta = _dw_bf / value2[i-1]
-                    units2.append(units2[i-1] + units2_delta)
-                    if units1[i] < EPSILON:  # 份额清零
-                        value1.append(0.)
-                        value2.append(0.)
-                    else:
-                        value1.append(_balance_cf1 / units1[i])
-                        value2.append(_balance_cf2 / units2[i])
-            else:  # 保持份额
-                units1.append(units1[i-1])
-                units2.append(units2[i-1])
-                value1.append(_balance_cf1 / units1[i])
-                value2.append(_balance_cf2 / units2[i])
-
-        client_df['实际份额'] = units1
-        client_df['实际净值'] = value1
-        client_df['即时份额'] = units2
-        client_df['即时净值'] = value2
-        client_df['即时期末结存'] = balance_cf2
-        # 填充无交易日数据
-        dummy_dates = sorted(list(map(
-            lambda x: datetime.strptime(x, '%Y%m%d'),
-            set(trading_dates) - set(client_df['日期'].values.tolist()))
-        ))
-        _start = True
-        for date in dummy_dates:
-            date_str = date.strftime('%Y%m%d')
-            if _start:  # 初始化第一行
-                if datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d') < date:
-                    prev_row = client_df.iloc[0]
-                    dummy_row = {
-                        '日期': date_str,
-                        '账户': client,
-                        '期初结存': prev_row['期末结存'],
-                        '期末结存': prev_row['期末结存'],
-                        '实际份额': prev_row['实际份额'],
-                        '实际净值': prev_row['实际净值'],
-                        '即时份额': prev_row['即时份额'],
-                        '即时净值': prev_row['即时净值'],
-                        '即时期末结存': prev_row['即时期末结存']
-                    }
-                    client_df = client_df.append(dummy_row, ignore_index=True)
-                else:
-                    print('else')
-                    dummy_row = {
-                        '日期': date_str,
-                        '账户': client_id,
-                    }
-                client_df = client_df.append(dummy_row, ignore_index=True)
-                _start = False
+    client_stats =[stats for stats in all_stats if stats['client_id'] == client_id]
+    client = '%s-%s' % (client_stats[0]['client_id'], client_stats[0]['client_name'])
+    client_data = []
+    for stats in client_stats:
+        row_dict = {}
+        row_dict['账户'] = client
+        row_dict['日期'] = stats['date']
+        row_dict['期初结存'] = stats['balance_bf']
+        row_dict['出入金合计'] = stats['total_deposit_withdrawal']
+        row_dict['平仓盈亏'] = stats['realized_pl']
+        row_dict['盯市盈亏'] = stats['mtm_pl']
+        row_dict['手续费'] = stats['commission']
+        row_dict['交割手续费'] = stats['delivery_fee']
+        row_dict['期末结存'] = stats['balance_cf']
+        # 处理银期出入金
+        dw_bf = 0.
+        if 'dw_array' in stats:
+            dw_bf += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
+            dw_bf -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账'])
+        row_dict['银期出入金'] = dw_bf
+        # 处理手续费返还
+        dw_rebate_fee = 0.
+        if 'dw_array' in stats:
+            dw_rebate_fee += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '手续费返还'])
+        row_dict['手续费返还'] = dw_rebate_fee
+        # 处理利息返还
+        dw_rebate_interest = 0.
+        if 'dw_array' in stats:
+            dw_rebate_interest += sum([dw_item['deposit'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '利息返还'])
+        row_dict['利息返还'] = dw_rebate_interest
+        # 处理中金所申报费
+        dw_cffex_fee = 0. 
+        if 'dw_array' in stats:
+            dw_cffex_fee -= sum([dw_item['withdrawal'] for dw_item in stats['dw_array'] if dw_item['dw_type'] == '中金所申报费'])
+        row_dict['中金所申报费'] = dw_cffex_fee
+        row_dict['中金所手续费'] = stats['CFFEX_COMM'] if 'CFFEX_COMM' in stats else 0.
+        row_dict['上期原油手续费'] = stats['INE_COMM'] if 'INE_COMM' in stats else 0.
+        row_dict['上期所手续费'] = stats['SHFE_COMM'] if 'SHFE_COMM' in stats else 0. 
+        row_dict['郑商所手续费'] = stats['CZCE_COMM'] if 'CZCE_COMM' in stats else 0. 
+        row_dict['大商所工业品手续费'] = stats['DCE_IND_COMM'] if 'DCE_IND_COMM' in stats else 0. 
+        row_dict['大商所农产品手续费'] = stats['DCE_AGR_COMM'] if 'DCE_AGR_COMM' in stats else 0.
+        client_data.append(row_dict)
+    # 总表
+    client_df = pd.DataFrame(client_data, columns=COLUMNS)
+    client_df['date'] = pd.to_datetime(client_df['日期'])
+    client_df.sort_values(by='date', ascending=True, inplace=True)
+    client_df.reset_index(inplace=True)
+    # 检查出入金
+    bug_rows = ((
+        client_df['银期出入金'] + client_df['手续费返还'] + client_df['利息返还'] + client_df['中金所申报费'] - client_df['出入金合计']
+        ).abs() > EPSILON
+    )
+    if bug_rows.sum() > 0:
+        print('WARNING! 出入金不匹配，请检查下列日期出入金数据：\n %s' % str(client_df[bug_rows]))
+    # 检查期初结存 + 当期总流水 与 期末结存
+    bug_rows = ((
+        client_df['期初结存'] + client_df['出入金合计'] + client_df['平仓盈亏'] + client_df['盯市盈亏'] + client_df['手续费'] - client_df['期末结存']
+        ).abs() > EPSILON
+    )
+    if bug_rows.sum() > 0:
+        print('WARNING! 期初结存+当期流水与期末结存不匹配，请检查下列日期数据：\n %s' % str(client_df[~bug_rows]))
+    # 检查期末结存与下期初结存
+    bug_rows = np.where(np.abs(client_df['期末结存'].values[:-1] - client_df['期初结存'].values[1:]) > EPSILON)[0].tolist()
+    if len(bug_rows) > 0:
+        bug_rows.append(max(bug_rows) + 1)
+        print('WARNING！期末结存与下期初结存不匹配，请检查下列日期数据：\n %s' % str(client_df.iloc[bug_rows]))
+    # 计算盈亏
+    total_pl1 = client_df['期末结存'] - client_df['期初结存'] - client_df['银期出入金']  # 当期实际盈亏
+    calc_rebate = []
+    for i in range(len(client_df)):
+        _date = client_df.iloc[i]['日期']
+        _calc_rebate = - client_df['中金所手续费'][i] * rebate_df.loc[_date, 'CFFEX'] \
+            - client_df['上期原油手续费'][i] * rebate_df.loc[_date, 'INE'] \
+            - client_df['上期所手续费'][i] * rebate_df.loc[_date, 'SHFE'] \
+            - client_df['郑商所手续费'][i] * rebate_df.loc[_date, 'CZCE'] \
+            - client_df['大商所工业品手续费'][i] * rebate_df.loc[_date, 'DCE_IND'] \
+            - client_df['大商所农产品手续费'][i] * rebate_df.loc[_date, 'DCE_AGR']
+        calc_rebate.append(_calc_rebate)
+    client_df['即时手续费返还'] = calc_rebate
+    total_pl2 = total_pl1 - client_df['手续费返还'] + client_df['即时手续费返还'] # 当期即时盈亏
+    client_df['实际盈亏'] = total_pl1
+    client_df['即时盈亏'] = total_pl2
+    # 计算份额和净值
+    value1, value2 = [1.,], [1.,]
+    units1 = [client_df['期末结存'][0] / value1[0], ]
+    units2 = [client_df['期末结存'][0] / value2[0], ]
+    balance_cf2 = [client_df['期末结存'][0],]  # 即时期末结存
+    for i in range(1, len(client_df)):
+        _dw_bf = client_df['银期出入金'][i]
+        _balance_cf1 = client_df['期末结存'][i]
+        _date = client_df['日期'][i]
+        _balance_cf2 = balance_cf2[i-1] + total_pl2[i] + _dw_bf  # 当期即时期末结存
+        balance_cf2.append(_balance_cf2)
+        if abs(_dw_bf) > EPSILON:  # 处理银期出入后份额变化
+            if value1[i-1] < EPSILON:  # 净值清零
+                value1.append(1.)
+                value2.append(1.)
+                units1.append(_dw_bf / 1.)
+                units2.append(_dw_bf / 1.)
             else:
-                prev_date_str = prev_trading_date(trading_dates, date_str)
-                prev_row = client_df[client_df['日期'] == prev_date_str].iloc[0]
+                units1_delta = _dw_bf / value1[i-1]
+                units1.append(units1[i-1] + units1_delta)
+                units2_delta = _dw_bf / value2[i-1]
+                units2.append(units2[i-1] + units2_delta)
+                if units1[i] < EPSILON:  # 份额清零
+                    value1.append(0.)
+                    value2.append(0.)
+                else:
+                    value1.append(_balance_cf1 / units1[i])
+                    value2.append(_balance_cf2 / units2[i])
+        else:  # 保持份额
+            units1.append(units1[i-1])
+            units2.append(units2[i-1])
+            value1.append(_balance_cf1 / units1[i])
+            value2.append(_balance_cf2 / units2[i])
+
+    client_df['实际份额'] = units1
+    client_df['实际净值'] = value1
+    client_df['即时份额'] = units2
+    client_df['即时净值'] = value2
+    client_df['即时期末结存'] = balance_cf2
+    # 填充无交易日数据
+    dummy_dates = sorted(list(map(
+        lambda x: datetime.strptime(x, '%Y%m%d'),
+        set(trading_dates) - set(client_df['日期'].values.tolist()))
+    ))
+    _start = True
+    for date in dummy_dates:
+        date_str = date.strftime('%Y%m%d')
+        if _start:  # 初始化第一行
+            if datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d') < date:
+                prev_row = client_df.iloc[0]
                 dummy_row = {
                     '日期': date_str,
                     '账户': client,
@@ -475,96 +458,117 @@ if __name__ == "__main__":
                     '即时净值': prev_row['即时净值'],
                     '即时期末结存': prev_row['即时期末结存']
                 }
-                client_df = client_df.append(dummy_row, ignore_index=True)
-        client_df['date'] = pd.to_datetime(client_df['日期'])
-        client_df.sort_values(by='date', ascending=True, inplace=True)
-        client_df.fillna(0, inplace=True)
-        client_df = client_df[client_df['日期'].apply(lambda d: datetime.strptime(d, '%Y%m%d')) >= start_date]
-        # 增加合计行
-        last_row = client_df.iloc[-1]
-        total_row = {
-            '账户': client_id,
-            '日期': '合计',
-            '期末结存': last_row['期末结存'],
-            '实际盈亏': last_row['实际盈亏'],
-            '实际份额': last_row['实际份额'],
-            '实际净值': last_row['实际净值'],
-            '即时手续费返还': client_df['即时手续费返还'].sum(),
-            '即时期末结存': last_row['即时期末结存'],
-            '即时盈亏': last_row['即时盈亏'],
-            '即时份额': last_row['即时份额'],
-            '即时净值': last_row['即时净值'],
-            '银期出入金': client_df['银期出入金'].sum(),
-            '手续费返还': client_df['手续费返还'].sum(),
-            '利息返还': client_df['利息返还'].sum(),
-            '中金所申报费': client_df['中金所申报费'].sum(),
-            '出入金合计': client_df['出入金合计'].sum(),
-            '平仓盈亏': client_df['平仓盈亏'].sum(),
-            '盯市盈亏': client_df['盯市盈亏'].sum(),
-            '手续费': client_df['手续费'].sum(),
-            '交割手续费': client_df['交割手续费'].sum(),
-            '中金所手续费': client_df['中金所手续费'].sum(),
-            '上期原油手续费': client_df['上期原油手续费'].sum(),
-            '上期所手续费': client_df['上期所手续费'].sum(),
-            '郑商所手续费': client_df['郑商所手续费'].sum(),
-            '大商所工业品手续费': client_df['大商所工业品手续费'].sum(),
-            '大商所农产品手续费': client_df['大商所农产品手续费'].sum(),
-        }
-        client_df = client_df.append(total_row, ignore_index=True)
-        # 写入结算主表
-        output_path = os.path.join(
-            output_dir, '%s_%s_%s.xlsx' 
-            % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
-        )
-        writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
-        client_df.to_excel(
-            writer, '结算汇总', index=False, columns=COLUMNS, freeze_panes=(1, 2)
-        )
-        workbook = writer.book
-        worksheet = writer.sheets['结算汇总']
-        for i, col in enumerate(COLUMNS):
-            if 11 <= i <= 16:
-                worksheet.set_column(i, i, 4)
             else:
-                if client_df[col].dtype == 'float64':
-                    max_width = client_df[col].apply(lambda x: len(str('%.2f' % x))).max()
-                    max_width = max(max_width, len(col))
-                    worksheet.set_column(i, i, max_width+1)
-                else:
-                    max_width = client_df[col].apply(lambda x: len(str(x))).max()
-                    max_width = max(max_width, len(col))
-                    worksheet.set_column(i, i, max_width+1)
-        # 作图
-        plot_path = os.path.join(
-            output_dir, '%s_%s_%s.png'
-            % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
-        )
-        fig, ax = plt.subplots(dpi=120, figsize=(12,6))
-        client_df.plot(kind='line', x='date', y='实际净值', label='real value', color='red', ax=ax)
-        client_df.plot(kind='line', x='date', y='即时净值', label='instant value', color='green', ax=ax)
-        ax.axhline(y=1.0, linestyle='--', color='black')
-        ax.set_title('Real profit: %.2fw, value: %.2f; Instant profit: %.2fw, value: %.2f' 
-            % (total_row['实际盈亏'], total_row['实际净值'], total_row['即时盈亏'], total_row['即时净值']))
-        plt.savefig(plot_path)
-        # 银期出入金副表
-        bf_array = []
-        for stats in client_stats:
-            if 'dw_array' not in stats:
+                dummy_row = {
+                    '日期': date_str,
+                    '账户': client,
+                }
+            _start = False
+        else:
+            prev_date_str = prev_trading_date(trading_dates, date_str)
+            prev_row = client_df[client_df['日期'] == prev_date_str].iloc[0]
+            dummy_row = {
+                '日期': date_str,
+                '账户': client,
+                '期初结存': prev_row['期末结存'],
+                '期末结存': prev_row['期末结存'],
+                '实际份额': prev_row['实际份额'],
+                '实际净值': prev_row['实际净值'],
+                '即时份额': prev_row['即时份额'],
+                '即时净值': prev_row['即时净值'],
+                '即时期末结存': prev_row['即时期末结存']
+            }
+        client_df = client_df.append(dummy_row, ignore_index=True)
+
+    client_df['date'] = pd.to_datetime(client_df['日期'])
+    client_df.sort_values(by='date', ascending=True, inplace=True)
+    client_df.fillna(0, inplace=True)
+    client_df = client_df[client_df['日期'].apply(lambda d: datetime.strptime(d, '%Y%m%d')) >= start_date]
+    # 增加合计行
+    last_row = client_df.iloc[-1]
+    total_row = {
+        '账户': client_id,
+        '日期': '合计',
+        '期末结存': last_row['期末结存'],
+        '实际盈亏': last_row['实际盈亏'],
+        '实际份额': last_row['实际份额'],
+        '实际净值': last_row['实际净值'],
+        '即时手续费返还': client_df['即时手续费返还'].sum(),
+        '即时期末结存': last_row['即时期末结存'],
+        '即时盈亏': last_row['即时盈亏'],
+        '即时份额': last_row['即时份额'],
+        '即时净值': last_row['即时净值'],
+        '银期出入金': client_df['银期出入金'].sum(),
+        '手续费返还': client_df['手续费返还'].sum(),
+        '利息返还': client_df['利息返还'].sum(),
+        '中金所申报费': client_df['中金所申报费'].sum(),
+        '出入金合计': client_df['出入金合计'].sum(),
+        '平仓盈亏': client_df['平仓盈亏'].sum(),
+        '盯市盈亏': client_df['盯市盈亏'].sum(),
+        '手续费': client_df['手续费'].sum(),
+        '交割手续费': client_df['交割手续费'].sum(),
+        '中金所手续费': client_df['中金所手续费'].sum(),
+        '上期原油手续费': client_df['上期原油手续费'].sum(),
+        '上期所手续费': client_df['上期所手续费'].sum(),
+        '郑商所手续费': client_df['郑商所手续费'].sum(),
+        '大商所工业品手续费': client_df['大商所工业品手续费'].sum(),
+        '大商所农产品手续费': client_df['大商所农产品手续费'].sum(),
+    }
+    client_df = client_df.append(total_row, ignore_index=True)
+    # 写入结算主表
+    output_path = os.path.join(
+        output_dir, '%s_%s_%s.xlsx' 
+        % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
+    )
+    writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
+    client_df.to_excel(
+        writer, '结算汇总', index=False, columns=COLUMNS, freeze_panes=(1, 2)
+    )
+    workbook = writer.book
+    worksheet = writer.sheets['结算汇总']
+    for i, col in enumerate(COLUMNS):
+        if 11 <= i <= 16:
+            worksheet.set_column(i, i, 4)
+        else:
+            if client_df[col].dtype == 'float64':
+                max_width = client_df[col].apply(lambda x: len(str('%.2f' % x))).max()
+                max_width = max(max_width, len(col))
+                worksheet.set_column(i, i, max_width+1)
+            else:
+                max_width = client_df[col].apply(lambda x: len(str(x))).max()
+                max_width = max(max_width, len(col))
+                worksheet.set_column(i, i, max_width+1)
+    # 作图
+    plot_path = os.path.join(
+        output_dir, '%s_%s_%s.png'
+        % (client, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'))
+    )
+    fig, ax = plt.subplots(dpi=120, figsize=(12,6))
+    client_df.plot(kind='line', x='date', y='实际净值', label='real value', color='red', ax=ax)
+    client_df.plot(kind='line', x='date', y='即时净值', label='instant value', color='green', ax=ax)
+    ax.axhline(y=1.0, linestyle='--', color='black')
+    ax.set_title('Real profit: %.2fw, value: %.2f; Instant profit: %.2fw, value: %.2f' 
+        % (total_row['实际盈亏'], total_row['实际净值'], total_row['即时盈亏'], total_row['即时净值']))
+    plt.savefig(plot_path)
+    # 银期出入金副表
+    bf_array = []
+    for stats in client_stats:
+        if 'dw_array' not in stats:
+            continue
+        bf_array += [dw_item for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账']
+    if len(bf_array) > 0:
+        bf_df = pd.DataFrame(bf_array)
+        bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
+        # 检查每日银期出入金
+        for date in client_df['日期']:
+            if date == '合计':
                 continue
-            bf_array += [dw_item for dw_item in stats['dw_array'] if dw_item['dw_type'] == '银期转账']
-        if len(bf_array) > 0:
-            bf_df = pd.DataFrame(bf_array)
-            bf_df.rename(columns={'date': '日期', 'deposit': '入金', 'withdrawal': '出金'}, inplace=True)
-            # 检查每日银期出入金
-            for date in client_df['日期']:
-                if date == '合计':
-                    continue
-                bf_rows = bf_df['日期'] == date
-                bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
-                if bug_rows.sum() > 0:
-                    print('WARNING! 银期出入金数据不匹配：%s' % date)
-            bf_df.to_excel(
-                writer, '银期转账', index=False, columns=('日期', '入金', '出金')
-            )
-        writer.save()
-        print('%s --> %s' % (client, output_path))
+            bf_rows = bf_df['日期'] == date
+            bug_rows = (bf_df[bf_rows]['入金'].sum() - bf_df[bf_rows]['出金'].sum() - client_df[client_df['日期'] == date]['银期出入金']).abs() > EPSILON
+            if bug_rows.sum() > 0:
+                print('WARNING! 银期出入金数据不匹配：%s' % date)
+        bf_df.to_excel(
+            writer, '银期转账', index=False, columns=('日期', '入金', '出金')
+        )
+    writer.save()
+    print('%s --> %s' % (client, output_path))
