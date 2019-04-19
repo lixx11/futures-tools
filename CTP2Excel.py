@@ -322,6 +322,7 @@ if __name__ == "__main__":
         row_dict = {}
         row_dict['账户'] = client
         row_dict['日期'] = stats['date']
+        row_dict['date'] = datetime.strptime(stats['date'], '%Y%m%d')
         row_dict['期初结存'] = stats['balance_bf']
         row_dict['出入金合计'] = stats['total_deposit_withdrawal']
         row_dict['平仓盈亏'] = stats['realized_pl']
@@ -441,35 +442,22 @@ if __name__ == "__main__":
         lambda x: datetime.strptime(x, '%Y%m%d'),
         set(trading_dates) - set(client_df['日期'].values.tolist()))
     ))
-    _start = True
+    first_row_existed = min(dummy_dates) > datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d')
     for date in dummy_dates:
         date_str = date.strftime('%Y%m%d')
-        if _start:  # 初始化第一行
-            if datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d') < date:
-                prev_row = client_df.iloc[0]
-                dummy_row = {
-                    '日期': date_str,
-                    '账户': client,
-                    '期初结存': prev_row['期末结存'],
-                    '期末结存': prev_row['期末结存'],
-                    '实际份额': prev_row['实际份额'],
-                    '实际净值': prev_row['实际净值'],
-                    '即时份额': prev_row['即时份额'],
-                    '即时净值': prev_row['即时净值'],
-                    '即时期末结存': prev_row['即时期末结存']
-                }
-            else:
-                dummy_row = {
-                    '日期': date_str,
-                    '账户': client,
-                }
-            _start = False
-        else:
-            prev_date_str = prev_trading_date(trading_dates, date_str)
-            prev_row = client_df[client_df['日期'] == prev_date_str].iloc[0]
+        if not first_row_existed:  # 若第一行不存在则手动初始化
             dummy_row = {
                 '日期': date_str,
                 '账户': client,
+                'date': date,
+            }
+            first_row_existed = True
+        else:
+            prev_row = client_df[client_df['date'] < date].sort_values('date').iloc[-1]
+            dummy_row = {
+                '日期': date_str,
+                '账户': client,
+                'date': date,
                 '期初结存': prev_row['期末结存'],
                 '期末结存': prev_row['期末结存'],
                 '实际份额': prev_row['实际份额'],
@@ -480,7 +468,6 @@ if __name__ == "__main__":
             }
         client_df = client_df.append(dummy_row, ignore_index=True)
 
-    client_df['date'] = pd.to_datetime(client_df['日期'])
     client_df.sort_values(by='date', ascending=True, inplace=True)
     client_df.fillna(0, inplace=True)
     client_df = client_df[client_df['日期'].apply(lambda d: datetime.strptime(d, '%Y%m%d')) >= start_date]
