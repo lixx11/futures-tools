@@ -442,31 +442,32 @@ if __name__ == "__main__":
         lambda x: datetime.strptime(x, '%Y%m%d'),
         set(trading_dates) - set(client_df['日期'].values.tolist()))
     ))
-    first_row_existed = min(dummy_dates) > datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d')
-    for date in dummy_dates:
-        date_str = date.strftime('%Y%m%d')
-        if not first_row_existed:  # 若第一行不存在则手动初始化
-            dummy_row = {
-                '日期': date_str,
-                '账户': client,
-                'date': date,
-            }
-            first_row_existed = True
-        else:
-            prev_row = client_df[client_df['date'] < date].sort_values('date').iloc[-1]
-            dummy_row = {
-                '日期': date_str,
-                '账户': client,
-                'date': date,
-                '期初结存': prev_row['期末结存'],
-                '期末结存': prev_row['期末结存'],
-                '实际份额': prev_row['实际份额'],
-                '实际净值': prev_row['实际净值'],
-                '即时份额': prev_row['即时份额'],
-                '即时净值': prev_row['即时净值'],
-                '即时期末结存': prev_row['即时期末结存']
-            }
-        client_df = client_df.append(dummy_row, ignore_index=True)
+    if len(dummy_dates) > 0:
+        first_row_existed = min(dummy_dates) > datetime.strptime(client_df.iloc[0]['日期'], '%Y%m%d')
+        for date in dummy_dates:
+            date_str = date.strftime('%Y%m%d')
+            if not first_row_existed:  # 若第一行不存在则手动初始化
+                dummy_row = {
+                    '日期': date_str,
+                    '账户': client,
+                    'date': date,
+                }
+                first_row_existed = True
+            else:
+                prev_row = client_df[client_df['date'] < date].sort_values('date').iloc[-1]
+                dummy_row = {
+                    '日期': date_str,
+                    '账户': client,
+                    'date': date,
+                    '期初结存': prev_row['期末结存'],
+                    '期末结存': prev_row['期末结存'],
+                    '实际份额': prev_row['实际份额'],
+                    '实际净值': prev_row['实际净值'],
+                    '即时份额': prev_row['即时份额'],
+                    '即时净值': prev_row['即时净值'],
+                    '即时期末结存': prev_row['即时期末结存']
+                }
+            client_df = client_df.append(dummy_row, ignore_index=True)
 
     client_df.sort_values(by='date', ascending=True, inplace=True)
     client_df.fillna(0, inplace=True)
