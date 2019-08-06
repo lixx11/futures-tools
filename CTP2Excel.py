@@ -94,6 +94,8 @@ def process_head(content):
         company = '国投安信'
     elif '兴证期货' in content[0]:
         company = '兴证期货'
+    elif '方正中期' in content[0]:
+        company = '方正中期'
     else:
         company = ''
     client_id = content[client_row].split('：')[1].strip().split()[0]
@@ -171,6 +173,8 @@ def process_deposit_withdrawal(content, company):
             dw_type = '银期转账'
         if '上海招行' in comment and company == '兴证期货':
             dw_type = '银期转账'
+        if '手续费抵免' in comment and company == '方正中期':
+            dw_type = '手续费返还'
         dw_array.append({
             'date': date.strip(),
             'dw_type': dw_type.strip(),
@@ -296,7 +300,8 @@ if __name__ == "__main__":
 
     CTP_files.sort(key=lambda fpath: datetime.strptime(os.path.basename(fpath).split('.')[0].split('_')[-1], '%Y%m%d'))
     print('正在处理CTP文件（共%d个文件）...' % len(CTP_files))
-    for CTP_file in CTP_files:
+    for i, CTP_file in enumerate(CTP_files):
+        print('处理第%d个CTP文件： %s' % (i, CTP_file))
         stats = extract_data(CTP_file)
         if stats['date'] in all_dates:
             print('跳过重复的CTP文件：%s' % CTP_file)
@@ -368,6 +373,7 @@ if __name__ == "__main__":
         client_df['银期出入金'] + client_df['手续费返还'] + client_df['利息返还'] + client_df['中金所申报费'] - client_df['出入金合计']
         ).abs() > EPSILON
     )
+    client_df.to_csv('client.csv')
     if bug_rows.sum() > 0:
         print('WARNING! 出入金不匹配，请检查下列日期出入金数据：\n %s' % str(client_df[bug_rows]))
     # 检查期初结存 + 当期总流水 与 期末结存
